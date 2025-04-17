@@ -1,1851 +1,1646 @@
-// Create a backup of the original file
-const originalCode = document.querySelector('html').outerHTML;
+/**
+ * Enhanced CBM Dashboard JavaScript
+ * 
+ * This script provides improved data handling and visualization for the CBM dashboard.
+ * It addresses data connection issues and enhances the analytical capabilities.
+ */
 
-// Enhanced CBM Dashboard Implementation
-// Based on solution strategy to fix data connection issues and improve functionality
+// Global data store
+const dashboardData = {
+    vessels: [],
+    equipmentCodes: {},
+    components: {},
+    readings: [],
+    parameters: {
+        "Vel, Rms (RMS)": { unit: "mm/s", thresholdWarning: 4.5, thresholdCritical: 7.1 },
+        "Disp, Rms (RMS)": { unit: "µm", thresholdWarning: 50, thresholdCritical: 100 },
+        "Acc, Rms (RMS)": { unit: "g", thresholdWarning: 1.5, thresholdCritical: 3.0 },
+        "RPM1": { unit: "rpm" },
+        "ALT_1": { unit: "A" }
+    },
+    charts: {}
+};
 
-// Create a backup of the original file before making changes
-const backupFileName = `index_backup_${new Date().toISOString().replace(/[:.]/g, '-')}.html`;
-const backupBlob = new Blob([originalCode], {type: 'text/html'});
-const backupLink = document.createElement('a');
-backupLink.href = URL.createObjectURL(backupBlob);
-backupLink.download = backupFileName;
-backupLink.click();
-console.log(`Backup created: ${backupFileName}`);
+// Initialize the dashboard
+document.addEventListener('DOMContentLoaded', function() {
+    initializeDropzone();
+    initializeTabs();
+    initializeEventListeners();
+    
+    // Try to load data from localStorage
+    loadDataFromLocalStorage();
+});
 
-// Implementation of enhanced data handling and visualization
-class EnhancedCBMDashboard {
-    constructor() {
-        // Initialize state
-        this.state = {
-            files: [],
-            rawData: [],
-            vessels: new Set(),
-            equipmentCodes: new Set(),
-            components: new Set(),
-            parameters: new Set(),
-            charts: {},
-            currentPage: 1,
-            itemsPerPage: 20,
-            equipmentHierarchy: {}, // New: Store equipment hierarchy
-            parameterMetadata: {}, // New: Store parameter metadata
-            dataQuality: {}, // New: Track data quality metrics
-            processingHistory: [] // New: Track processing history
-        };
-        
-        // Initialize UI elements
-        this.initializeUI();
-        
-        // Initialize event listeners
-        this.initializeEventListeners();
-        
-        // Initialize parameter metadata
-        this.initializeParameterMetadata();
-    }
+// Initialize the file dropzone
+function initializeDropzone() {
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('file-input');
     
-    // Initialize UI elements
-    initializeUI() {
-        // Dropzone and file input
-        this.dropzone = document.getElementById('dropzone');
-        this.fileInput = document.getElementById('file-input');
-        this.fileList = document.getElementById('file-list');
-        this.processBtn = document.getElementById('process-btn');
-        
-        // Tabs
-        this.tabBtns = document.querySelectorAll('.tab-btn');
-        this.tabContents = document.querySelectorAll('.tab-content');
-        
-        // Toast notification
-        this.toast = document.getElementById('toast');
-        this.toastMessage = document.getElementById('toast-message');
-    }
+    // Handle drag and drop events
+    dropzone.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        dropzone.classList.add('active');
+    });
     
-    // Initialize parameter metadata with units and normal ranges
-    initializeParameterMetadata() {
-        this.state.parameterMetadata = {
-            'Vel, Rms (RMS)': {
-                unit: 'mm/s',
-                normalRange: [0, 4.5],
-                warningRange: [4.5, 7.1],
-                criticalThreshold: 7.1,
-                description: 'Vibration velocity (RMS)',
-                category: 'vibration'
-            },
-            'Disp, Rms (RMS)': {
-                unit: 'μm',
-                normalRange: [0, 50],
-                warningRange: [50, 100],
-                criticalThreshold: 100,
-                description: 'Vibration displacement (RMS)',
-                category: 'vibration'
-            },
-            'Acc, Rms (RMS)': {
-                unit: 'g',
-                normalRange: [0, 1],
-                warningRange: [1, 2],
-                criticalThreshold: 2,
-                description: 'Vibration acceleration (RMS)',
-                category: 'vibration'
-            },
-            'RPM1': {
-                unit: 'rpm',
-                description: 'Rotational speed',
-                category: 'operational'
-            },
-            'ALT_1': {
-                unit: 'A',
-                description: 'Current',
-                category: 'operational'
-            }
-        };
-        
-        // Add bearing-specific parameters
-        const bearingParameters = [
-            'Bearing', 'Bearing, BPFO', 'Bearing, BPFI', 'Bearing, BSF', 'Bearing, FTF',
-            'Cuscinetto DE', 'Cuscinetto NDE', 'Bearing DE - ISO 6305', 'Bearing NDE - ISO 6306'
-        ];
-        
-        bearingParameters.forEach(param => {
-            if (param.includes('BPFO')) {
-                this.state.parameterMetadata[param] = {
-                    unit: 'g',
-                    description: 'Ball Pass Frequency Outer Race',
-                    category: 'bearing'
-                };
-            } else if (param.includes('BPFI')) {
-                this.state.parameterMetadata[param] = {
-                    unit: 'g',
-                    description: 'Ball Pass Frequency Inner Race',
-                    category: 'bearing'
-                };
-            } else if (param.includes('BSF')) {
-                this.state.parameterMetadata[param] = {
-                    unit: 'g',
-                    description: 'Ball Spin Frequency',
-                    category: 'bearing'
-                };
-            } else if (param.includes('FTF')) {
-                this.state.parameterMetadata[param] = {
-                    unit: 'g',
-                    description: 'Fundamental Train Frequency',
-                    category: 'bearing'
-                };
-            } else {
-                this.state.parameterMetadata[param] = {
-                    unit: 'g',
-                    description: 'Bearing vibration',
-                    category: 'bearing'
-                };
-            }
-        });
-    }
+    dropzone.addEventListener('dragleave', function() {
+        dropzone.classList.remove('active');
+    });
     
-    // Initialize event listeners
-    initializeEventListeners() {
-        // Tab switching
-        this.tabBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const tabId = btn.getAttribute('data-tab');
-                this.switchTab(tabId);
+    dropzone.addEventListener('drop', function(e) {
+        e.preventDefault();
+        dropzone.classList.remove('active');
+        
+        if (e.dataTransfer.files.length) {
+            handleFiles(e.dataTransfer.files);
+        }
+    });
+    
+    // Handle click to browse files
+    dropzone.addEventListener('click', function() {
+        fileInput.click();
+    });
+    
+    fileInput.addEventListener('change', function() {
+        if (fileInput.files.length) {
+            handleFiles(fileInput.files);
+        }
+    });
+}
+
+// Initialize tabs
+function initializeTabs() {
+    const tabButtons = document.querySelectorAll('.tab-btn');
+    const tabContents = document.querySelectorAll('.tab-content');
+    
+    tabButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            const tabId = this.getAttribute('data-tab');
+            
+            // Update active tab button
+            tabButtons.forEach(btn => {
+                btn.classList.remove('border-blue-800', 'text-blue-800');
+                btn.classList.add('text-gray-500');
             });
-        });
-        
-        // Dropzone events
-        this.dropzone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            this.dropzone.classList.add('active');
-        });
-        
-        this.dropzone.addEventListener('dragleave', () => {
-            this.dropzone.classList.remove('active');
-        });
-        
-        this.dropzone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            this.dropzone.classList.remove('active');
-            if (e.dataTransfer.files.length) {
-                this.fileInput.files = e.dataTransfer.files;
-                this.updateFileList();
+            this.classList.remove('text-gray-500');
+            this.classList.add('border-blue-800', 'text-blue-800');
+            
+            // Update active tab content
+            tabContents.forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(tabId).classList.add('active');
+            
+            // Refresh charts if needed
+            if (tabId === 'equipment') {
+                updateEquipmentAnalysis();
+            } else if (tabId === 'trend') {
+                updateTrendAnalysis();
+            } else if (tabId === 'raw') {
+                updateRawDataView();
+            } else if (tabId === 'missing') {
+                updateMissingReadingsView();
             }
         });
+    });
+}
 
-        this.dropzone.addEventListener('click', () => this.fileInput.click());
-        this.fileInput.addEventListener('change', () => this.updateFileList());
-
-        // Process button
-        this.processBtn.addEventListener('click', () => this.processFiles());
-        
-        // Pagination
-        document.getElementById('raw-prev-page').addEventListener('click', () => this.prevPage());
-        document.getElementById('raw-next-page').addEventListener('click', () => this.nextPage());
-        
-        // Search and filters
-        document.getElementById('raw-search').addEventListener('input', () => this.updateRawDataTable());
-        document.getElementById('raw-vessel').addEventListener('change', () => this.updateRawDataTable());
-        document.getElementById('raw-parameter').addEventListener('change', () => this.updateRawDataTable());
-        document.getElementById('raw-range').addEventListener('change', () => this.updateRawDataTable());
-        
-        // Trend analysis filters
-        document.getElementById('trend-vessel').addEventListener('change', () => this.updateTrendChart());
-        document.getElementById('trend-parameter').addEventListener('change', () => this.updateTrendChart());
-        document.getElementById('trend-range').addEventListener('change', () => this.updateTrendChart());
-        
-        // Equipment analysis filters
-        document.getElementById('equipment-vessel').addEventListener('change', () => this.updateEquipmentFilters());
-        document.getElementById('equipment-code').addEventListener('change', () => this.updateEquipmentFilters());
-        document.getElementById('equipment-component').addEventListener('change', () => this.updateEquipmentAnalysis());
-        document.getElementById('equipment-parameter').addEventListener('change', () => this.updateEquipmentAnalysis());
-        
-        // Missing equipment filters
-        document.getElementById('missing-vessel').addEventListener('change', () => this.refreshMissingEquipmentData());
-        document.getElementById('missing-threshold').addEventListener('change', () => this.refreshMissingEquipmentData());
-        document.getElementById('missing-sort').addEventListener('change', () => this.refreshMissingEquipmentData());
-        
-        // Export buttons
-        document.getElementById('export-equipment-btn').addEventListener('click', () => this.exportEquipmentData());
-        document.getElementById('export-trend-btn').addEventListener('click', () => this.exportTrendData());
-        document.getElementById('export-raw-btn').addEventListener('click', () => this.exportRawData());
-        document.getElementById('export-missing-btn').addEventListener('click', () => this.exportMissingEquipmentReport());
-    }
-
-    // Switch between tabs
-    switchTab(tabId) {
-        // Remove active class from all tabs and content
-        this.tabBtns.forEach(btn => {
-            btn.classList.remove('border-b-2', 'border-blue-800', 'text-blue-800');
-            btn.classList.add('text-gray-500');
-        });
-        
-        this.tabContents.forEach(content => {
-            content.classList.remove('active');
-        });
-        
-        // Add active class to clicked tab
-        const activeBtn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
-        if (activeBtn) {
-            activeBtn.classList.remove('text-gray-500');
-            activeBtn.classList.add('border-b-2', 'border-blue-800', 'text-blue-800');
+// Initialize event listeners for filters and buttons
+function initializeEventListeners() {
+    // Equipment Analysis tab
+    document.getElementById('equipment-vessel').addEventListener('change', updateEquipmentCodes);
+    document.getElementById('equipment-code').addEventListener('change', updateEquipmentComponents);
+    document.getElementById('equipment-component').addEventListener('change', updateEquipmentAnalysis);
+    document.getElementById('equipment-parameter').addEventListener('change', updateEquipmentAnalysis);
+    document.getElementById('export-equipment-btn').addEventListener('click', exportEquipmentData);
+    
+    // Trend Analysis tab
+    document.getElementById('trend-parameter').addEventListener('change', updateTrendAnalysis);
+    document.getElementById('trend-vessel').addEventListener('change', updateTrendAnalysis);
+    document.getElementById('trend-range').addEventListener('change', updateTrendAnalysis);
+    document.getElementById('export-trend-btn').addEventListener('click', exportTrendData);
+    
+    // Raw Data tab
+    document.getElementById('raw-search').addEventListener('input', updateRawDataView);
+    document.getElementById('raw-vessel').addEventListener('change', updateRawDataView);
+    document.getElementById('raw-parameter').addEventListener('change', updateRawDataView);
+    document.getElementById('raw-range').addEventListener('change', updateRawDataView);
+    document.getElementById('raw-prev-page').addEventListener('click', function() {
+        const currentPage = parseInt(document.getElementById('raw-current-page').textContent);
+        if (currentPage > 1) {
+            document.getElementById('raw-current-page').textContent = currentPage - 1;
+            updateRawDataView();
         }
-        
-        // Show corresponding content
-        document.getElementById(tabId).classList.add('active');
-        
-        // Initialize tab-specific content if needed
-        if (tabId === 'equipment' && this.state.rawData.length > 0) {
-            this.updateEquipmentFilters();
-        } else if (tabId === 'trend' && this.state.rawData.length > 0) {
-            this.updateTrendChart();
-        } else if (tabId === 'raw' && this.state.rawData.length > 0) {
-            this.updateRawDataTable();
-        } else if (tabId === 'missing' && this.state.rawData.length > 0) {
-            this.refreshMissingEquipmentData();
+    });
+    document.getElementById('raw-next-page').addEventListener('click', function() {
+        const currentPage = parseInt(document.getElementById('raw-current-page').textContent);
+        const totalPages = parseInt(document.getElementById('raw-total-pages').textContent);
+        if (currentPage < totalPages) {
+            document.getElementById('raw-current-page').textContent = currentPage + 1;
+            updateRawDataView();
         }
-    }
+    });
+    document.getElementById('export-raw-btn').addEventListener('click', exportRawData);
+    
+    // Missing Readings tab
+    document.getElementById('missing-vessel').addEventListener('change', updateMissingReadingsView);
+    document.getElementById('missing-threshold').addEventListener('change', updateMissingReadingsView);
+    document.getElementById('missing-sort').addEventListener('change', updateMissingReadingsView);
+    document.getElementById('export-missing-btn').addEventListener('click', exportMissingData);
+    
+    // Process button
+    document.getElementById('process-btn').addEventListener('click', processFiles);
+}
 
-    // Update file list after selection
-    updateFileList() {
-        this.fileList.innerHTML = '';
-        this.state.files = Array.from(this.fileInput.files);
-
-        if (this.state.files.length === 0) {
-            this.fileList.innerHTML = '<div class="text-gray-500 p-4 text-center">No files uploaded yet</div>';
-            this.processBtn.disabled = true;
-            return;
-        }
-
-        this.state.files.forEach(file => {
-            const fileItem = document.createElement('div');
-            fileItem.className = 'flex items-center justify-between p-4';
-            fileItem.innerHTML = `
-                <div class="flex items-center">
-                    <svg class="w-6 h-6 text-blue-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                    </svg>
-                    <div>
-                        <div class="font-medium">${file.name}</div>
-                        <div class="text-sm text-gray-500">${this.formatFileSize(file.size)}</div>
-                    </div>
+// Handle uploaded files
+function handleFiles(files) {
+    const fileList = document.getElementById('file-list');
+    fileList.innerHTML = '';
+    
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const fileItem = document.createElement('div');
+        fileItem.className = 'p-4 flex items-center justify-between';
+        
+        // Extract vessel name from filename
+        const vesselName = extractVesselName(file.name);
+        
+        fileItem.innerHTML = `
+            <div class="flex items-center">
+                <svg class="w-8 h-8 text-blue-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+                <div>
+                    <div class="font-medium">${file.name}</div>
+                    <div class="text-sm text-gray-500">Vessel: ${vesselName}, Size: ${formatFileSize(file.size)}</div>
                 </div>
-                <div class="text-sm text-blue-500">Ready</div>
-            `;
-            this.fileList.appendChild(fileItem);
-        });
-
-        this.processBtn.disabled = false;
-    }
-
-    // Format file size for display
-    formatFileSize(bytes) {
-        if (bytes < 1024) return bytes + ' bytes';
-        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-        return (bytes / 1048576).toFixed(1) + ' MB';
-    }
-
-    // Process uploaded files
-    async processFiles() {
-        if (this.state.files.length === 0) {
-            this.showToast('No files to process', 'error');
-            return;
-        }
-
-        this.processBtn.disabled = true;
-        this.processBtn.innerHTML = `
-            <svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            Processing...
+            </div>
+            <div class="text-green-500 text-sm font-medium">Ready to process</div>
         `;
-
-        // Show processing indicator
-        document.getElementById('processing-results').classList.remove('hidden');
-        document.getElementById('processed-files').textContent = '0';
-        document.getElementById('processed-records').textContent = '0';
         
-        const startTime = performance.now();
-        let totalRecords = 0;
-        let processedFiles = 0;
-        
-        // Initialize combined data array
-        this.state.rawData = [];
-        this.state.vessels = new Set();
-        this.state.equipmentCodes = new Set();
-        this.state.components = new Set();
-        this.state.parameters = new Set();
-        
-        // Process each file
-        const processNextFile = (index) => {
-            if (index >= this.state.files.length) {
-                // All files processed
-                const endTime = performance.now();
-                const processingTime = ((endTime - startTime) / 1000).toFixed(2);
-                
-                // Update UI
-                document.getElementById('processing-time').textContent = `${processingTime}s`;
-                
-                // Initialize analysis tabs
-                this.initializeAnalysisTabs();
-                this.showToast(`Processed ${this.state.rawData.length} records from ${this.state.files.length} files successfully`);
-                
-                // Save to localStorage for persistence
-                this.saveToLocalStorage();
-                
-                // Switch to Equipment Analysis tab
-                this.switchTab('equipment');
-                
-                this.processBtn.disabled = false;
-                this.processBtn.innerHTML = `
-                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                    </svg>
-                    Process Files
-                `;
-                return;
-            }
-            
-            const file = this.state.files[index];
-            const reader = new FileReader();
-            
-            reader.onload = (e) => {
-                try {
-                    // Extract vessel name from filename (improved)
-                    const vesselName = this.extractVesselName(file.name);
-                    this.state.vessels.add(vesselName);
-                    
-                    // Parse file based on type
-                    let data;
-                    if (file.name.endsWith('.csv')) {
-                        data = this.parseCSV(e.target.result);
-                    } else {
-                        const arrayBuffer = e.target.result;
-                        const data = new Uint8Array(arrayBuffer);
-                        const workbook = XLSX.read(data, { type: 'array' });
-                        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-                        data = XLSX.utils.sheet_to_json(worksheet);
-                    }
-                    
-                    // Process data with improved parser
-                    const parsedData = this.parseData(data, vesselName);
-                    
-                    // Add to combined data
-                    this.state.rawData = this.state.rawData.concat(parsedData);
-                    
-                    // Update counters
-                    totalRecords += parsedData.length;
-                    processedFiles++;
-                    
-                    // Update UI
-                    document.getElementById('processed-files').textContent = processedFiles;
-                    document.getElementById('processed-records').textContent = totalRecords;
-                    
-                    // Update file list item
-                    const fileItems = this.fileList.querySelectorAll('div.flex');
-                    if (fileItems[index]) {
-                        const statusElement = fileItems[index].querySelector('.text-sm.text-blue-500');
-                        if (statusElement) {
-                            statusElement.textContent = 'Processed';
-                            statusElement.className = 'text-sm text-green-500';
-                        }
-                    }
-                    
-                    // Process next file
-                    processNextFile(index + 1);
-                } catch (error) {
-                    console.error('Error processing file:', error);
-                    this.showToast(`Error processing file ${file.name}: ${error.message}`, 'error');
-                    
-                    // Update file list item to show error
-                    const fileItems = this.fileList.querySelectorAll('div.flex');
-                    if (fileItems[index]) {
-                        const statusElement = fileItems[index].querySelector('.text-sm.text-blue-500');
-                        if (statusElement) {
-                            statusElement.textContent = 'Error';
-                            statusElement.className = 'text-sm text-red-500';
-                        }
-                    }
-                    
-                    // Continue with next file
-                    processNextFile(index + 1);
-                }
-            };
-            
-            reader.onerror = () => {
-                console.error('Error reading file:', file.name);
-                this.showToast(`Error reading file ${file.name}`, 'error');
-                
-                // Update file list item to show error
-                const fileItems = this.fileList.querySelectorAll('div.flex');
-                if (fileItems[index]) {
-                    const statusElement = fileItems[index].querySelector('.text-sm.text-blue-500');
-                    if (statusElement) {
-                        statusElement.textContent = 'Error';
-                        statusElement.className = 'text-sm text-red-500';
-                    }
-                }
-                
-                // Continue with next file
-                processNextFile(index + 1);
-            };
-            
-            // Read file as array buffer for Excel files, text for CSV
-            if (file.name.endsWith('.csv')) {
-                reader.readAsText(file);
-            } else {
-                reader.readAsArrayBuffer(file);
-            }
-        };
-        
-        // Start processing files
-        processNextFile(0);
-    }
-
-    // Extract vessel name from filename (improved)
-    extractVesselName(filename) {
-        // Remove file extension
-        let vesselName = filename.replace(/\.[^/.]+$/, "");
-        
-        // Remove "CBM" and clean up the name
-        vesselName = vesselName.replace(/\s*CBM\s*$/i, "").trim();
-        
-        return vesselName;
-    }
-
-    // Parse CSV data
-    parseCSV(csvText) {
-        const lines = csvText.split('\n');
-        const headers = lines[0].split(',').map(h => h.trim());
-        const result = [];
-        
-        for (let i = 1; i < lines.length; i++) {
-            if (!lines[i].trim()) continue;
-            
-            const values = lines[i].split(',');
-            const row = {};
-            
-            for (let j = 0; j < headers.length; j++) {
-                row[headers[j]] = values[j];
-            }
-            
-            result.push(row);
-        }
-        
-        return result;
-    }
-
-    // Parse data from file (enhanced)
-    parseData(data, vesselName) {
-        const parsedData = [];
-        let dataQualityIssues = 0;
-        
-        data.forEach(row => {
-            try {
-                // Create proper timestamp from DATE and TIME columns
-                let timestamp;
-                let hasDateIssue = false;
-                
-                if (row.DATE !== undefined && row.TIME !== undefined) {
-                    timestamp = this.formatTimestamp(row.DATE, row.TIME);
-                    if (!timestamp) {
-                        hasDateIssue = true;
-                        timestamp = new Date().toISOString();
-                    }
-                } else if (row.TIMESTAMP !== undefined) {
-                    timestamp = this.formatTimestamp(row.TIMESTAMP);
-                    if (!timestamp) {
-                        hasDateIssue = true;
-                        timestamp = new Date().toISOString();
-                    }
-                } else {
-                    hasDateIssue = true;
-                    timestamp = new Date().toISOString();
-                }
-                
-                // Extract equipment code and component name
-                const equipmentCode = row.MP_NUMBER || '';
-                const componentNumber = row.COMP_NUMBER || '';
-                const component = row.COMP_NAME || '';
-                const measurementPoint = row.MP_NAME || '';
-                
-                // Add to sets for filtering
-                if (equipmentCode) this.state.equipmentCodes.add(equipmentCode);
-                if (component) this.state.components.add(component);
-                
-                // Update equipment hierarchy
-                if (equipmentCode && component) {
-                    if (!this.state.equipmentHierarchy[vesselName]) {
-                        this.state.equipmentHierarchy[vesselName] = {};
-                    }
-                    if (!this.state.equipmentHierarchy[vesselName][equipmentCode]) {
-                        this.state.equipmentHierarchy[vesselName][equipmentCode] = {};
-                    }
-                    this.state.equipmentHierarchy[vesselName][equipmentCode][component] = true;
-                }
-                
-                // Create a clean data object with all relevant fields
-                const cleanRow = {
-                    VESSEL: vesselName,
-                    EQUIPMENT_CODE: equipmentCode,
-                    MP_NUMBER: equipmentCode,
-                    COMP_NUMBER: componentNumber,
-                    COMP_NAME: component,
-                    MP_NAME: measurementPoint,
-                    TIMESTAMP: timestamp,
-                    DATE: row.DATE,
-                    TIME: row.TIME,
-                    hasDateIssue: hasDateIssue
-                };
-                
-                // Extract all numeric parameters
-                let paramCount = 0;
-                for (const key in row) {
-                    // Skip non-parameter fields
-                    if (['DATE', 'TIME', 'TIMESTAMP', 'MP_NUMBER', 'MP_NAME', 'COMP_NUMBER', 'COMP_NAME'].includes(key)) {
-                        continue;
-                    }
-                    
-                    // Try to parse as number
-                    const value = parseFloat(row[key]);
-                    if (!isNaN(value)) {
-                        cleanRow[key] = value;
-                        this.state.parameters.add(key);
-                        paramCount++;
-                    } else if (row[key] !== undefined && row[key] !== null && row[key] !== '') {
-                        // Store non-numeric values as strings
-                        cleanRow[key] = row[key];
-                    }
-                }
-                
-                // Ensure critical parameters are present (with defaults if missing)
-                const criticalParams = ['Vel, Rms (RMS)', 'Disp, Rms (RMS)', 'Acc, Rms (RMS)', 'RPM1', 'ALT_1'];
-                criticalParams.forEach(param => {
-                    if (cleanRow[param] === undefined) {
-                        cleanRow[param] = 0;
-                        dataQualityIssues++;
-                    }
-                });
-                
-                // Add data quality score
-                cleanRow.dataQuality = paramCount > 0 ? 1 - (dataQualityIssues / paramCount) : 0;
-                
-                parsedData.push(cleanRow);
-            } catch (error) {
-                console.error('Error parsing row:', error, row);
-                dataQualityIssues++;
-            }
-        });
-        
-        // Store data quality metrics
-        this.state.dataQuality[vesselName] = {
-            totalRows: data.length,
-            parsedRows: parsedData.length,
-            qualityIssues: dataQualityIssues,
-            qualityScore: data.length > 0 ? 1 - (dataQualityIssues / data.length) : 0
-        };
-        
-        return parsedData;
-    }
-
-    // Format timestamp (enhanced)
-    formatTimestamp(date, time) {
-        try {
-            // Handle Excel numeric date format
-            if (typeof date === 'number') {
-                // Excel dates are number of days since 1900-01-01
-                const excelEpoch = new Date(1900, 0, 1);
-                const dateObj = new Date(excelEpoch.getTime() + (date - 1) * 24 * 60 * 60 * 1000);
-                
-                // Add time component if available
-                if (typeof time === 'number') {
-                    // Excel time is fraction of day
-                    const millisInDay = 24 * 60 * 60 * 1000;
-                    dateObj.setTime(dateObj.getTime() + time * millisInDay);
-                }
-                
-                return dateObj.toISOString();
-            }
-            
-            // Use moment.js for better date parsing
-            if (time) {
-                // Try to parse date and time together
-                const dateTimeStr = `${date} ${time}`;
-                const momentDate = moment(dateTimeStr);
-                if (momentDate.isValid()) {
-                    return momentDate.toISOString();
-                }
-                
-                // Try different formats
-                const formats = [
-                    'YYYY-MM-DD HH:mm:ss',
-                    'DD/MM/YYYY HH:mm:ss',
-                    'MM/DD/YYYY HH:mm:ss',
-                    'YYYY/MM/DD HH:mm:ss'
-                ];
-                
-                for (const format of formats) {
-                    const parsedDate = moment(dateTimeStr, format);
-                    if (parsedDate.isValid()) {
-                        return parsedDate.toISOString();
-                    }
-                }
-            } else {
-                // Try to parse date only
-                const momentDate = moment(date);
-                if (momentDate.isValid()) {
-                    return momentDate.toISOString();
-                }
-            }
-            
-            // If all else fails, return null to indicate parsing failure
-            return null;
-        } catch (e) {
-            console.error('Error parsing date:', e, date, time);
-            return null;
-        }
+        fileList.appendChild(fileItem);
     }
     
-    // Format timestamp for display
-    formatDisplayTimestamp(timestamp) {
-        if (!timestamp) return '';
-        
-        try {
-            const date = new Date(timestamp);
-            if (isNaN(date.getTime())) return timestamp;
-            
-            return moment(date).format('DD MMM YYYY HH:mm');
-        } catch (e) {
-            return timestamp;
-        }
-    }
-    
-    // Save data to localStorage for persistence
-    saveToLocalStorage() {
-        try {
-            // Save only essential data to avoid storage limits
-            const dataToSave = {
-                vessels: Array.from(this.state.vessels),
-                equipmentCodes: Array.from(this.state.equipmentCodes),
-                components: Array.from(this.state.components),
-                parameters: Array.from(this.state.parameters),
-                equipmentHierarchy: this.state.equipmentHierarchy,
-                dataQuality: this.state.dataQuality,
-                lastUpdated: new Date().toISOString()
-            };
-            
-            localStorage.setItem('cbmDashboardMetadata', JSON.stringify(dataToSave));
-            
-            // Add to processing history
-            this.state.processingHistory.push({
-                timestamp: new Date().toISOString(),
-                fileCount: this.state.files.length,
-                recordCount: this.state.rawData.length
-            });
-            
-            localStorage.setItem('cbmProcessingHistory', JSON.stringify(this.state.processingHistory));
-            
-            console.log('Data saved to localStorage');
-        } catch (e) {
-            console.error('Error saving to localStorage:', e);
-        }
-    }
-    
-    // Load data from localStorage
-    loadFromLocalStorage() {
-        try {
-            const savedMetadata = localStorage.getItem('cbmDashboardMetadata');
-            if (savedMetadata) {
-                const data = JSON.parse(savedMetadata);
-                
-                // Restore sets
-                this.state.vessels = new Set(data.vessels || []);
-                this.state.equipmentCodes = new Set(data.equipmentCodes || []);
-                this.state.components = new Set(data.components || []);
-                this.state.parameters = new Set(data.parameters || []);
-                
-                // Restore objects
-                this.state.equipmentHierarchy = data.equipmentHierarchy || {};
-                this.state.dataQuality = data.dataQuality || {};
-                
-                console.log('Data loaded from localStorage');
-                return true;
-            }
-            return false;
-        } catch (e) {
-            console.error('Error loading from localStorage:', e);
-            return false;
-        }
-    }
-    
-    // Initialize analysis tabs after data processing
-    initializeAnalysisTabs() {
-        // Populate vessel dropdowns
-        const vesselSelects = [
-            document.getElementById('equipment-vessel'),
-            document.getElementById('trend-vessel'),
-            document.getElementById('raw-vessel'),
-            document.getElementById('missing-vessel')
-        ];
-        
-        vesselSelects.forEach(select => {
-            if (!select) return;
-            
-            // Clear existing options
-            select.innerHTML = '';
-            
-            // Add default option
-            const defaultOption = document.createElement('option');
-            defaultOption.value = '';
-            defaultOption.textContent = select.id === 'trend-vessel' ? 'All Vessels' : 'Select Vessel';
-            select.appendChild(defaultOption);
-            
-            // Add vessel options
-            Array.from(this.state.vessels).sort().forEach(vessel => {
-                const option = document.createElement('option');
-                option.value = vessel;
-                option.textContent = vessel;
-                select.appendChild(option);
-            });
-        });
-        
-        // Populate parameter dropdowns
-        const parameterSelects = [
-            document.getElementById('equipment-parameter'),
-            document.getElementById('trend-parameter'),
-            document.getElementById('raw-parameter')
-        ];
-        
-        parameterSelects.forEach(select => {
-            if (!select) return;
-            
-            // Clear existing options
-            select.innerHTML = '';
-            
-            // Add default vibration parameters
-            const defaultParams = [
-                'Vel, Rms (RMS)',
-                'Disp, Rms (RMS)',
-                'Acc, Rms (RMS)',
-                'RPM1',
-                'ALT_1'
-            ];
-            
-            defaultParams.forEach(param => {
-                const option = document.createElement('option');
-                option.value = param;
-                
-                // Add units and description if available
-                let displayText = param;
-                if (this.state.parameterMetadata[param]) {
-                    const metadata = this.state.parameterMetadata[param];
-                    if (metadata.unit) {
-                        displayText += ` (${metadata.unit})`;
-                    }
-                }
-                
-                option.textContent = displayText;
-                select.appendChild(option);
-            });
-            
-            // Add additional parameters found in data
-            const additionalParams = Array.from(this.state.parameters)
-                .filter(param => !defaultParams.includes(param))
-                .sort();
-                
-            if (additionalParams.length > 0) {
-                // Add separator
-                const separator = document.createElement('option');
-                separator.disabled = true;
-                separator.textContent = '──────────';
-                select.appendChild(separator);
-                
-                // Add additional parameters
-                additionalParams.forEach(param => {
-                    const option = document.createElement('option');
-                    option.value = param;
-                    option.textContent = param;
-                    select.appendChild(option);
-                });
-            }
-        });
-        
-        // Initialize equipment filters
-        this.updateEquipmentFilters();
-        
-        // Initialize trend chart
-        this.updateTrendChart();
-        
-        // Initialize raw data table
-        this.updateRawDataTable();
-        
-        // Initialize missing equipment data
-        this.refreshMissingEquipmentData();
-    }
-    
-    // Update equipment filters based on selection
-    updateEquipmentFilters() {
-        const vesselSelect = document.getElementById('equipment-vessel');
-        const equipmentSelect = document.getElementById('equipment-code');
-        const componentSelect = document.getElementById('equipment-component');
-        
-        const selectedVessel = vesselSelect.value;
-        const selectedEquipment = equipmentSelect.value;
-        
-        // Update equipment codes based on vessel selection
-        if (selectedVessel && this.state.equipmentHierarchy[selectedVessel]) {
-            // Clear existing options
-            equipmentSelect.innerHTML = '';
-            
-            // Add default option
-            const defaultOption = document.createElement('option');
-            defaultOption.value = '';
-            defaultOption.textContent = 'Select Code';
-            equipmentSelect.appendChild(defaultOption);
-            
-            // Add equipment options
-            Object.keys(this.state.equipmentHierarchy[selectedVessel])
-                .sort()
-                .forEach(code => {
-                    const option = document.createElement('option');
-                    option.value = code;
-                    option.textContent = code;
-                    equipmentSelect.appendChild(option);
-                });
-        } else if (!selectedVessel) {
-            // If no vessel selected, show all equipment codes
-            equipmentSelect.innerHTML = '';
-            
-            // Add default option
-            const defaultOption = document.createElement('option');
-            defaultOption.value = '';
-            defaultOption.textContent = 'Select Code';
-            equipmentSelect.appendChild(defaultOption);
-            
-            // Add all equipment codes
-            Array.from(this.state.equipmentCodes)
-                .sort()
-                .forEach(code => {
-                    const option = document.createElement('option');
-                    option.value = code;
-                    option.textContent = code;
-                    equipmentSelect.appendChild(option);
-                });
-        }
-        
-        // Update components based on vessel and equipment selection
-        if (selectedVessel && selectedEquipment && 
-            this.state.equipmentHierarchy[selectedVessel] && 
-            this.state.equipmentHierarchy[selectedVessel][selectedEquipment]) {
-            
-            // Clear existing options
-            componentSelect.innerHTML = '';
-            
-            // Add default option
-            const defaultOption = document.createElement('option');
-            defaultOption.value = '';
-            defaultOption.textContent = 'Select Component';
-            componentSelect.appendChild(defaultOption);
-            
-            // Add component options
-            Object.keys(this.state.equipmentHierarchy[selectedVessel][selectedEquipment])
-                .sort()
-                .forEach(comp => {
-                    const option = document.createElement('option');
-                    option.value = comp;
-                    option.textContent = comp;
-                    componentSelect.appendChild(option);
-                });
-        } else {
-            // If no vessel or equipment selected, show all components
-            componentSelect.innerHTML = '';
-            
-            // Add default option
-            const defaultOption = document.createElement('option');
-            defaultOption.value = '';
-            defaultOption.textContent = 'Select Component';
-            componentSelect.appendChild(defaultOption);
-            
-            // Add all components
-            Array.from(this.state.components)
-                .sort()
-                .forEach(comp => {
-                    const option = document.createElement('option');
-                    option.value = comp;
-                    option.textContent = comp;
-                    componentSelect.appendChild(option);
-                });
-        }
-        
-        // Update analysis based on current selections
-        this.updateEquipmentAnalysis();
-    }
-    
-    // Update equipment analysis
-    updateEquipmentAnalysis() {
-        const vessel = document.getElementById('equipment-vessel').value;
-        const equipment = document.getElementById('equipment-code').value;
-        const component = document.getElementById('equipment-component').value;
-        const parameter = document.getElementById('equipment-parameter').value;
-        
-        // Filter data based on selections
-        let filteredData = this.state.rawData.filter(row => {
-            return (!vessel || row.VESSEL === vessel) &&
-                   (!equipment || row.EQUIPMENT_CODE === equipment) &&
-                   (!component || row.COMP_NAME === component);
-        });
-        
-        // Sort by timestamp
-        filteredData.sort((a, b) => new Date(a.TIMESTAMP) - new Date(b.TIMESTAMP));
-        
-        // Update charts
-        this.updateEquipmentChart(filteredData, parameter);
-        
-        // Update readings table
-        this.updateEquipmentReadingsTable(filteredData, parameter);
-    }
-    
-    // Update equipment chart
-    updateEquipmentChart(data, parameter) {
-        const ctx = document.getElementById('equipment-trend-chart').getContext('2d');
-        
-        // Prepare chart data
-        const labels = data.map(row => this.formatDisplayTimestamp(row.TIMESTAMP));
-        const values = data.map(row => row[parameter]);
-        
-        // Get parameter metadata
-        const metadata = this.state.parameterMetadata[parameter] || {};
-        const parameterLabel = metadata.unit ? `${parameter} (${metadata.unit})` : parameter;
-        
-        // Create threshold lines if available
-        let thresholdDatasets = [];
-        if (metadata.warningRange && metadata.criticalThreshold) {
-            thresholdDatasets = [
-                {
-                    label: 'Warning Threshold',
-                    data: Array(labels.length).fill(metadata.warningRange[0]),
-                    borderColor: '#f59e0b',
-                    borderWidth: 1,
-                    borderDash: [5, 5],
-                    fill: false,
-                    pointRadius: 0
-                },
-                {
-                    label: 'Critical Threshold',
-                    data: Array(labels.length).fill(metadata.criticalThreshold),
-                    borderColor: '#ef4444',
-                    borderWidth: 1,
-                    borderDash: [5, 5],
-                    fill: false,
-                    pointRadius: 0
-                }
-            ];
-        }
-        
-        // Create or update chart
-        if (this.state.charts.equipmentTrendChart) {
-            this.state.charts.equipmentTrendChart.data.labels = labels;
-            this.state.charts.equipmentTrendChart.data.datasets[0].data = values;
-            this.state.charts.equipmentTrendChart.data.datasets[0].label = parameterLabel;
-            
-            // Update threshold lines if available
-            if (thresholdDatasets.length > 0) {
-                if (this.state.charts.equipmentTrendChart.data.datasets.length > 1) {
-                    this.state.charts.equipmentTrendChart.data.datasets[1] = thresholdDatasets[0];
-                    if (this.state.charts.equipmentTrendChart.data.datasets.length > 2) {
-                        this.state.charts.equipmentTrendChart.data.datasets[2] = thresholdDatasets[1];
-                    } else {
-                        this.state.charts.equipmentTrendChart.data.datasets.push(thresholdDatasets[1]);
-                    }
-                } else {
-                    this.state.charts.equipmentTrendChart.data.datasets.push(...thresholdDatasets);
-                }
-            } else {
-                // Remove threshold lines if not needed
-                this.state.charts.equipmentTrendChart.data.datasets = [this.state.charts.equipmentTrendChart.data.datasets[0]];
-            }
-            
-            this.state.charts.equipmentTrendChart.update();
-        } else {
-            // Combine main dataset with thresholds
-            const datasets = [
-                {
-                    label: parameterLabel,
-                    data: values,
-                    borderColor: '#3b82f6',
-                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                    borderWidth: 2,
-                    fill: true
-                },
-                ...thresholdDatasets
-            ];
-            
-            this.state.charts.equipmentTrendChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: datasets
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        x: {
-                            title: {
-                                display: true,
-                                text: 'Timestamp'
-                            }
-                        },
-                        y: {
-                            title: {
-                                display: true,
-                                text: parameterLabel
-                            }
-                        }
-                    },
-                    plugins: {
-                        tooltip: {
-                            mode: 'index',
-                            intersect: false
-                        },
-                        legend: {
-                            position: 'top'
-                        }
-                    }
-                }
-            });
-        }
-        
-        // Update RPM vs Ampere chart if data is available
-        if (parameter === 'RPM1' || parameter === 'ALT_1') {
-            this.updateRpmAmpereChart(data);
-        }
-    }
-    
-    // Update RPM vs Ampere chart
-    updateRpmAmpereChart(data) {
-        const ctx = document.getElementById('rpm-ampere-chart').getContext('2d');
-        
-        // Prepare data points
-        const rpmData = data.map(row => row.RPM1);
-        const ampereData = data.map(row => row.ALT_1);
-        const labels = data.map(row => this.formatDisplayTimestamp(row.TIMESTAMP));
-        
-        // Create or update chart
-        if (this.state.charts.rpmAmpereChart) {
-            this.state.charts.rpmAmpereChart.data.labels = labels;
-            this.state.charts.rpmAmpereChart.data.datasets[0].data = rpmData;
-            this.state.charts.rpmAmpereChart.data.datasets[1].data = ampereData;
-            this.state.charts.rpmAmpereChart.update();
-        } else {
-            this.state.charts.rpmAmpereChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [
-                        {
-                            label: 'RPM',
-                            data: rpmData,
-                            borderColor: '#3b82f6',
-                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                            borderWidth: 2,
-                            yAxisID: 'y'
-                        },
-                        {
-                            label: 'Ampere',
-                            data: ampereData,
-                            borderColor: '#10b981',
-                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                            borderWidth: 2,
-                            yAxisID: 'y1'
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        x: {
-                            title: {
-                                display: true,
-                                text: 'Timestamp'
-                            }
-                        },
-                        y: {
-                            type: 'linear',
-                            display: true,
-                            position: 'left',
-                            title: {
-                                display: true,
-                                text: 'RPM'
-                            }
-                        },
-                        y1: {
-                            type: 'linear',
-                            display: true,
-                            position: 'right',
-                            title: {
-                                display: true,
-                                text: 'Ampere'
-                            },
-                            grid: {
-                                drawOnChartArea: false
-                            }
-                        }
-                    },
-                    plugins: {
-                        tooltip: {
-                            mode: 'index',
-                            intersect: false
-                        }
-                    }
-                }
-            });
-        }
-    }
-    
-    // Update equipment readings table
-    updateEquipmentReadingsTable(data, parameter) {
-        const tableBody = document.getElementById('equipment-readings');
-        tableBody.innerHTML = '';
-        
-        // Sort by timestamp (newest first)
-        const sortedData = [...data].sort((a, b) => new Date(b.TIMESTAMP) - new Date(a.TIMESTAMP));
-        
-        // Show only the most recent 10 readings
-        const recentData = sortedData.slice(0, 10);
-        
-        if (recentData.length === 0) {
-            tableBody.innerHTML = `
-                <tr>
-                    <td colspan="6" class="px-4 py-4 text-center text-gray-500">No data available</td>
-                </tr>
-            `;
-            return;
-        }
-        
-        // Get parameter metadata for status determination
-        const metadata = this.state.parameterMetadata[parameter] || {};
-        
-        // Add rows to table
-        recentData.forEach(row => {
-            const value = row[parameter];
-            let status, statusClass;
-            
-            // Determine status based on parameter value and metadata
-            if (metadata.normalRange && metadata.warningRange && metadata.criticalThreshold) {
-                if (value > metadata.criticalThreshold) {
-                    status = 'Critical';
-                    statusClass = 'status-critical';
-                } else if (value > metadata.warningRange[0]) {
-                    status = 'Warning';
-                    statusClass = 'status-warning';
-                } else {
-                    status = 'Normal';
-                    statusClass = 'status-good';
-                }
-            } else if (parameter === 'Vel, Rms (RMS)') {
-                // Fallback for velocity if metadata not available
-                if (value > 7.1) {
-                    status = 'Critical';
-                    statusClass = 'status-critical';
-                } else if (value > 4.5) {
-                    status = 'Warning';
-                    statusClass = 'status-warning';
-                } else {
-                    status = 'Normal';
-                    statusClass = 'status-good';
-                }
-            } else {
-                status = 'Normal';
-                statusClass = 'status-good';
-            }
-            
-            // Format value with units if available
-            let displayValue = value;
-            if (metadata.unit) {
-                displayValue = `${value} ${metadata.unit}`;
-            }
-            
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td class="px-4 py-2">${this.formatDisplayTimestamp(row.TIMESTAMP)}</td>
-                <td class="px-4 py-2">${row.EQUIPMENT_CODE}</td>
-                <td class="px-4 py-2">${row.COMP_NAME}</td>
-                <td class="px-4 py-2">${parameter}</td>
-                <td class="px-4 py-2">${displayValue}</td>
-                <td class="px-4 py-2">
-                    <span class="status-indicator ${statusClass}"></span>
-                    ${status}
-                </td>
-            `;
-            tableBody.appendChild(tr);
-        });
-    }
-    
-    // Update trend chart
-    updateTrendChart() {
-        const vessel = document.getElementById('trend-vessel').value;
-        const parameter = document.getElementById('trend-parameter').value;
-        const range = parseInt(document.getElementById('trend-range').value);
-        
-        // Filter data based on selections
-        let filteredData = this.state.rawData.filter(row => {
-            // Filter by vessel if selected
-            if (vessel && row.VESSEL !== vessel) {
-                return false;
-            }
-            
-            // Filter by date range if specified
-            if (range > 0) {
-                const cutoffDate = new Date();
-                cutoffDate.setDate(cutoffDate.getDate() - range);
-                return new Date(row.TIMESTAMP) >= cutoffDate;
-            }
-            
-            return true;
-        });
-        
-        // Sort by timestamp
-        filteredData.sort((a, b) => new Date(a.TIMESTAMP) - new Date(b.TIMESTAMP));
-        
-        // Group data by vessel for multi-series chart
-        const vesselData = {};
-        filteredData.forEach(row => {
-            if (!vesselData[row.VESSEL]) {
-                vesselData[row.VESSEL] = {
-                    timestamps: [],
-                    values: []
-                };
-            }
-            
-            vesselData[row.VESSEL].timestamps.push(this.formatDisplayTimestamp(row.TIMESTAMP));
-            vesselData[row.VESSEL].values.push(row[parameter]);
-        });
-        
-        // Prepare datasets for chart
-        const datasets = [];
-        const colors = [
-            '#3b82f6', // blue
-            '#10b981', // green
-            '#f59e0b', // amber
-            '#8b5cf6', // purple
-            '#ec4899', // pink
-            '#06b6d4', // cyan
-            '#f97316', // orange
-            '#14b8a6'  // teal
-        ];
-        
-        let colorIndex = 0;
-        for (const vessel in vesselData) {
-            datasets.push({
-                label: vessel,
-                data: vesselData[vessel].values,
-                borderColor: colors[colorIndex % colors.length],
-                backgroundColor: `${colors[colorIndex % colors.length]}33`,
-                borderWidth: 2,
-                fill: false
-            });
-            colorIndex++;
-        }
-        
-        // Get parameter metadata
-        const metadata = this.state.parameterMetadata[parameter] || {};
-        const parameterLabel = metadata.unit ? `${parameter} (${metadata.unit})` : parameter;
-        
-        // Create chart
-        const ctx = document.getElementById('trend-chart').getContext('2d');
-        
-        if (this.state.charts.trendChart) {
-            this.state.charts.trendChart.data.datasets = datasets;
-            
-            // Use timestamps from first vessel or empty array if no data
-            const timestamps = datasets.length > 0 ? 
-                vesselData[Object.keys(vesselData)[0]].timestamps : [];
-                
-            this.state.charts.trendChart.data.labels = timestamps;
-            this.state.charts.trendChart.options.scales.y.title.text = parameterLabel;
-            this.state.charts.trendChart.update();
-        } else {
-            // Use timestamps from first vessel or empty array if no data
-            const timestamps = datasets.length > 0 ? 
-                vesselData[Object.keys(vesselData)[0]].timestamps : [];
-                
-            this.state.charts.trendChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: timestamps,
-                    datasets: datasets
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        x: {
-                            title: {
-                                display: true,
-                                text: 'Timestamp'
-                            }
-                        },
-                        y: {
-                            title: {
-                                display: true,
-                                text: parameterLabel
-                            }
-                        }
-                    },
-                    plugins: {
-                        tooltip: {
-                            mode: 'index',
-                            intersect: false
-                        },
-                        legend: {
-                            position: 'top'
-                        }
-                    }
-                }
-            });
-        }
-        
-        // Calculate statistics
-        this.updateTrendStatistics(filteredData, parameter);
-    }
-    
-    // Update trend statistics
-    updateTrendStatistics(data, parameter) {
-        const values = data.map(row => row[parameter]).filter(val => !isNaN(val));
-        
-        if (values.length === 0) {
-            document.getElementById('trend-average').textContent = '-';
-            document.getElementById('trend-minimum').textContent = '-';
-            document.getElementById('trend-maximum').textContent = '-';
-            document.getElementById('trend-stddev').textContent = '-';
-            return;
-        }
-        
-        // Calculate statistics
-        const sum = values.reduce((a, b) => a + b, 0);
-        const avg = sum / values.length;
-        const min = Math.min(...values);
-        const max = Math.max(...values);
-        
-        // Calculate standard deviation
-        const squareDiffs = values.map(value => {
-            const diff = value - avg;
-            return diff * diff;
-        });
-        const avgSquareDiff = squareDiffs.reduce((a, b) => a + b, 0) / squareDiffs.length;
-        const stdDev = Math.sqrt(avgSquareDiff);
-        
-        // Get parameter metadata for units
-        const metadata = this.state.parameterMetadata[parameter] || {};
-        const unit = metadata.unit || '';
-        
-        // Update UI
-        document.getElementById('trend-average').textContent = `${avg.toFixed(2)} ${unit}`;
-        document.getElementById('trend-minimum').textContent = `${min.toFixed(2)} ${unit}`;
-        document.getElementById('trend-maximum').textContent = `${max.toFixed(2)} ${unit}`;
-        document.getElementById('trend-stddev').textContent = `${stdDev.toFixed(2)} ${unit}`;
-    }
-    
-    // Update raw data table
-    updateRawDataTable() {
-        const vessel = document.getElementById('raw-vessel').value;
-        const parameter = document.getElementById('raw-parameter').value;
-        const range = parseInt(document.getElementById('raw-range').value);
-        const search = document.getElementById('raw-search').value.toLowerCase();
-        
-        // Filter data based on selections
-        let filteredData = this.state.rawData.filter(row => {
-            // Filter by vessel if selected
-            if (vessel && row.VESSEL !== vessel) {
-                return false;
-            }
-            
-            // Filter by date range if specified
-            if (range > 0) {
-                const cutoffDate = new Date();
-                cutoffDate.setDate(cutoffDate.getDate() - range);
-                return new Date(row.TIMESTAMP) >= cutoffDate;
-            }
-            
-            // Filter by search term
-            if (search) {
-                return (
-                    (row.VESSEL && row.VESSEL.toLowerCase().includes(search)) ||
-                    (row.EQUIPMENT_CODE && row.EQUIPMENT_CODE.toLowerCase().includes(search)) ||
-                    (row.COMP_NAME && row.COMP_NAME.toLowerCase().includes(search))
-                );
-            }
-            
-            return true;
-        });
-        
-        // Sort by timestamp (newest first)
-        filteredData.sort((a, b) => new Date(b.TIMESTAMP) - new Date(a.TIMESTAMP));
-        
-        // Update pagination info
-        const totalItems = filteredData.length;
-        const totalPages = Math.ceil(totalItems / this.state.itemsPerPage);
-        
-        // Ensure current page is valid
-        if (this.state.currentPage > totalPages) {
-            this.state.currentPage = totalPages || 1;
-        }
-        
-        // Get current page data
-        const startIndex = (this.state.currentPage - 1) * this.state.itemsPerPage;
-        const endIndex = startIndex + this.state.itemsPerPage;
-        const currentPageData = filteredData.slice(startIndex, endIndex);
-        
-        // Update table
-        const tableBody = document.getElementById('raw-data-body');
-        tableBody.innerHTML = '';
-        
-        if (currentPageData.length === 0) {
-            tableBody.innerHTML = `
-                <tr>
-                    <td colspan="6" class="px-4 py-4 text-center text-gray-500">No data available</td>
-                </tr>
-            `;
-        } else {
-            // Get parameter metadata for units
-            const metadata = this.state.parameterMetadata[parameter] || {};
-            const unit = metadata.unit || '';
-            
-            currentPageData.forEach(row => {
-                const tr = document.createElement('tr');
-                
-                // Format value with units if available
-                let displayValue = row[parameter];
-                if (unit) {
-                    displayValue = `${displayValue} ${unit}`;
-                }
-                
-                tr.innerHTML = `
-                    <td class="px-4 py-2">${this.formatDisplayTimestamp(row.TIMESTAMP)}</td>
-                    <td class="px-4 py-2">${row.VESSEL}</td>
-                    <td class="px-4 py-2">${row.EQUIPMENT_CODE}</td>
-                    <td class="px-4 py-2">${row.COMP_NAME}</td>
-                    <td class="px-4 py-2">${parameter}</td>
-                    <td class="px-4 py-2">${displayValue}</td>
-                `;
-                tableBody.appendChild(tr);
-            });
-        }
-        
-        // Update pagination controls
-        document.getElementById('raw-current-page').textContent = this.state.currentPage;
-        document.getElementById('raw-total-pages').textContent = totalPages;
-        document.getElementById('raw-prev-page').disabled = this.state.currentPage <= 1;
-        document.getElementById('raw-next-page').disabled = this.state.currentPage >= totalPages;
-        
-        // Update record count
-        document.getElementById('raw-record-count').textContent = totalItems;
-    }
-    
-    // Go to previous page
-    prevPage() {
-        if (this.state.currentPage > 1) {
-            this.state.currentPage--;
-            this.updateRawDataTable();
-        }
-    }
-    
-    // Go to next page
-    nextPage() {
-        const totalItems = this.state.rawData.length;
-        const totalPages = Math.ceil(totalItems / this.state.itemsPerPage);
-        
-        if (this.state.currentPage < totalPages) {
-            this.state.currentPage++;
-            this.updateRawDataTable();
-        }
-    }
-    
-    // Refresh missing equipment data
-    refreshMissingEquipmentData() {
-        const vessel = document.getElementById('missing-vessel').value;
-        const threshold = parseInt(document.getElementById('missing-threshold').value);
-        const sortBy = document.getElementById('missing-sort').value;
-        
-        // Filter data based on vessel selection
-        let filteredData = this.state.rawData;
-        if (vessel) {
-            filteredData = filteredData.filter(row => row.VESSEL === vessel);
-        }
-        
-        // Group data by equipment and component
-        const equipmentData = {};
-        
-        filteredData.forEach(row => {
-            const key = `${row.VESSEL}|${row.EQUIPMENT_CODE}|${row.COMP_NAME}`;
-            
-            if (!equipmentData[key]) {
-                equipmentData[key] = {
-                    vessel: row.VESSEL,
-                    equipmentCode: row.EQUIPMENT_CODE,
-                    component: row.COMP_NAME,
-                    readings: [],
-                    lastReading: null,
-                    daysSinceLastReading: 0
-                };
-            }
-            
-            equipmentData[key].readings.push({
-                timestamp: row.TIMESTAMP,
-                value: row['Vel, Rms (RMS)']
-            });
-        });
-        
-        // Calculate days since last reading
-        const now = new Date();
-        
-        for (const key in equipmentData) {
-            const equipment = equipmentData[key];
-            
-            // Sort readings by timestamp (newest first)
-            equipment.readings.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-            
-            if (equipment.readings.length > 0) {
-                equipment.lastReading = equipment.readings[0].timestamp;
-                const lastReadingDate = new Date(equipment.lastReading);
-                const diffTime = Math.abs(now - lastReadingDate);
-                equipment.daysSinceLastReading = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            }
-        }
-        
-        // Filter by threshold
-        const missingEquipment = Object.values(equipmentData)
-            .filter(equipment => equipment.daysSinceLastReading >= threshold);
-        
-        // Sort by selected criteria
-        if (sortBy === 'days') {
-            missingEquipment.sort((a, b) => b.daysSinceLastReading - a.daysSinceLastReading);
-        } else if (sortBy === 'vessel') {
-            missingEquipment.sort((a, b) => a.vessel.localeCompare(b.vessel));
-        } else if (sortBy === 'equipment') {
-            missingEquipment.sort((a, b) => a.equipmentCode.localeCompare(b.equipmentCode));
-        }
-        
-        // Update table
-        const tableBody = document.getElementById('missing-equipment-body');
-        tableBody.innerHTML = '';
-        
-        if (missingEquipment.length === 0) {
-            tableBody.innerHTML = `
-                <tr>
-                    <td colspan="5" class="px-4 py-4 text-center text-gray-500">No missing readings found</td>
-                </tr>
-            `;
-        } else {
-            missingEquipment.forEach(equipment => {
-                const tr = document.createElement('tr');
-                
-                // Determine status class based on days since last reading
-                let statusClass;
-                if (equipment.daysSinceLastReading >= 90) {
-                    statusClass = 'status-critical';
-                } else if (equipment.daysSinceLastReading >= 30) {
-                    statusClass = 'status-warning';
-                } else {
-                    statusClass = 'status-good';
-                }
-                
-                tr.innerHTML = `
-                    <td class="px-4 py-2">${equipment.vessel}</td>
-                    <td class="px-4 py-2">${equipment.equipmentCode}</td>
-                    <td class="px-4 py-2">${equipment.component}</td>
-                    <td class="px-4 py-2">${this.formatDisplayTimestamp(equipment.lastReading)}</td>
-                    <td class="px-4 py-2">
-                        <span class="status-indicator ${statusClass}"></span>
-                        ${equipment.daysSinceLastReading} days
-                    </td>
-                `;
-                tableBody.appendChild(tr);
-            });
-        }
-        
-        // Update count
-        document.getElementById('missing-count').textContent = missingEquipment.length;
-    }
-    
-    // Export equipment data
-    exportEquipmentData() {
-        const vessel = document.getElementById('equipment-vessel').value;
-        const equipment = document.getElementById('equipment-code').value;
-        const component = document.getElementById('equipment-component').value;
-        const parameter = document.getElementById('equipment-parameter').value;
-        
-        // Filter data based on selections
-        let filteredData = this.state.rawData.filter(row => {
-            return (!vessel || row.VESSEL === vessel) &&
-                   (!equipment || row.EQUIPMENT_CODE === equipment) &&
-                   (!component || row.COMP_NAME === component);
-        });
-        
-        // Sort by timestamp
-        filteredData.sort((a, b) => new Date(a.TIMESTAMP) - new Date(b.TIMESTAMP));
-        
-        // Prepare CSV data
-        const headers = ['Timestamp', 'Vessel', 'Equipment Code', 'Component', parameter];
-        const rows = filteredData.map(row => [
-            this.formatDisplayTimestamp(row.TIMESTAMP),
-            row.VESSEL,
-            row.EQUIPMENT_CODE,
-            row.COMP_NAME,
-            row[parameter]
-        ]);
-        
-        // Generate CSV
-        this.exportToCSV(headers, rows, `equipment_data_${new Date().toISOString().slice(0, 10)}.csv`);
-    }
-    
-    // Export trend data
-    exportTrendData() {
-        const vessel = document.getElementById('trend-vessel').value;
-        const parameter = document.getElementById('trend-parameter').value;
-        const range = parseInt(document.getElementById('trend-range').value);
-        
-        // Filter data based on selections
-        let filteredData = this.state.rawData.filter(row => {
-            // Filter by vessel if selected
-            if (vessel && row.VESSEL !== vessel) {
-                return false;
-            }
-            
-            // Filter by date range if specified
-            if (range > 0) {
-                const cutoffDate = new Date();
-                cutoffDate.setDate(cutoffDate.getDate() - range);
-                return new Date(row.TIMESTAMP) >= cutoffDate;
-            }
-            
-            return true;
-        });
-        
-        // Sort by timestamp
-        filteredData.sort((a, b) => new Date(a.TIMESTAMP) - new Date(b.TIMESTAMP));
-        
-        // Prepare CSV data
-        const headers = ['Timestamp', 'Vessel', 'Equipment Code', 'Component', parameter];
-        const rows = filteredData.map(row => [
-            this.formatDisplayTimestamp(row.TIMESTAMP),
-            row.VESSEL,
-            row.EQUIPMENT_CODE,
-            row.COMP_NAME,
-            row[parameter]
-        ]);
-        
-        // Generate CSV
-        this.exportToCSV(headers, rows, `trend_data_${new Date().toISOString().slice(0, 10)}.csv`);
-    }
-    
-    // Export raw data
-    exportRawData() {
-        const vessel = document.getElementById('raw-vessel').value;
-        const parameter = document.getElementById('raw-parameter').value;
-        const range = parseInt(document.getElementById('raw-range').value);
-        const search = document.getElementById('raw-search').value.toLowerCase();
-        
-        // Filter data based on selections
-        let filteredData = this.state.rawData.filter(row => {
-            // Filter by vessel if selected
-            if (vessel && row.VESSEL !== vessel) {
-                return false;
-            }
-            
-            // Filter by date range if specified
-            if (range > 0) {
-                const cutoffDate = new Date();
-                cutoffDate.setDate(cutoffDate.getDate() - range);
-                return new Date(row.TIMESTAMP) >= cutoffDate;
-            }
-            
-            // Filter by search term
-            if (search) {
-                return (
-                    (row.VESSEL && row.VESSEL.toLowerCase().includes(search)) ||
-                    (row.EQUIPMENT_CODE && row.EQUIPMENT_CODE.toLowerCase().includes(search)) ||
-                    (row.COMP_NAME && row.COMP_NAME.toLowerCase().includes(search))
-                );
-            }
-            
-            return true;
-        });
-        
-        // Sort by timestamp
-        filteredData.sort((a, b) => new Date(a.TIMESTAMP) - new Date(b.TIMESTAMP));
-        
-        // Prepare CSV data
-        const headers = ['Timestamp', 'Vessel', 'Equipment Code', 'Component', parameter];
-        const rows = filteredData.map(row => [
-            this.formatDisplayTimestamp(row.TIMESTAMP),
-            row.VESSEL,
-            row.EQUIPMENT_CODE,
-            row.COMP_NAME,
-            row[parameter]
-        ]);
-        
-        // Generate CSV
-        this.exportToCSV(headers, rows, `raw_data_${new Date().toISOString().slice(0, 10)}.csv`);
-    }
-    
-    // Export missing equipment report
-    exportMissingEquipmentReport() {
-        const vessel = document.getElementById('missing-vessel').value;
-        const threshold = parseInt(document.getElementById('missing-threshold').value);
-        
-        // Filter data based on vessel selection
-        let filteredData = this.state.rawData;
-        if (vessel) {
-            filteredData = filteredData.filter(row => row.VESSEL === vessel);
-        }
-        
-        // Group data by equipment and component
-        const equipmentData = {};
-        
-        filteredData.forEach(row => {
-            const key = `${row.VESSEL}|${row.EQUIPMENT_CODE}|${row.COMP_NAME}`;
-            
-            if (!equipmentData[key]) {
-                equipmentData[key] = {
-                    vessel: row.VESSEL,
-                    equipmentCode: row.EQUIPMENT_CODE,
-                    component: row.COMP_NAME,
-                    readings: [],
-                    lastReading: null,
-                    daysSinceLastReading: 0
-                };
-            }
-            
-            equipmentData[key].readings.push({
-                timestamp: row.TIMESTAMP,
-                value: row['Vel, Rms (RMS)']
-            });
-        });
-        
-        // Calculate days since last reading
-        const now = new Date();
-        
-        for (const key in equipmentData) {
-            const equipment = equipmentData[key];
-            
-            // Sort readings by timestamp (newest first)
-            equipment.readings.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-            
-            if (equipment.readings.length > 0) {
-                equipment.lastReading = equipment.readings[0].timestamp;
-                const lastReadingDate = new Date(equipment.lastReading);
-                const diffTime = Math.abs(now - lastReadingDate);
-                equipment.daysSinceLastReading = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            }
-        }
-        
-        // Filter by threshold
-        const missingEquipment = Object.values(equipmentData)
-            .filter(equipment => equipment.daysSinceLastReading >= threshold)
-            .sort((a, b) => b.daysSinceLastReading - a.daysSinceLastReading);
-        
-        // Prepare CSV data
-        const headers = ['Vessel', 'Equipment Code', 'Component', 'Last Reading', 'Days Since Last Reading'];
-        const rows = missingEquipment.map(equipment => [
-            equipment.vessel,
-            equipment.equipmentCode,
-            equipment.component,
-            this.formatDisplayTimestamp(equipment.lastReading),
-            equipment.daysSinceLastReading
-        ]);
-        
-        // Generate CSV
-        this.exportToCSV(headers, rows, `missing_readings_${new Date().toISOString().slice(0, 10)}.csv`);
-    }
-    
-    // Export data to CSV
-    exportToCSV(headers, rows, filename) {
-        // Create CSV content
-        let csvContent = headers.join(',') + '\n';
-        
-        rows.forEach(row => {
-            csvContent += row.join(',') + '\n';
-        });
-        
-        // Create download link
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.setAttribute('href', url);
-        link.setAttribute('download', filename);
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        
-        this.showToast(`Exported ${rows.length} records to ${filename}`);
-    }
-    
-    // Show toast notification
-    showToast(message, type = 'success') {
-        this.toastMessage.textContent = message;
-        
-        // Set toast color based on type
-        if (type === 'error') {
-            this.toast.className = 'bg-red-500 text-white px-6 py-3 rounded shadow-lg';
-        } else if (type === 'warning') {
-            this.toast.className = 'bg-yellow-500 text-white px-6 py-3 rounded shadow-lg';
-        } else {
-            this.toast.className = 'bg-green-500 text-white px-6 py-3 rounded shadow-lg';
-        }
-        
-        // Show toast
-        this.toast.classList.add('show');
-        
-        // Hide toast after 3 seconds
-        setTimeout(() => {
-            this.toast.classList.remove('show');
-        }, 3000);
+    // Show file list if files are uploaded
+    if (files.length > 0) {
+        fileList.classList.remove('hidden');
+        document.querySelector('#file-list .text-gray-500.p-4.text-center')?.remove();
     }
 }
 
-// Initialize dashboard when DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
-    window.dashboard = new EnhancedCBMDashboard();
-    console.log('Enhanced CBM Dashboard initialized');
-});
+// Extract vessel name from filename
+function extractVesselName(filename) {
+    // Remove file extension
+    let vesselName = filename.replace(/\.[^/.]+$/, "");
+    
+    // Remove "CBM" and clean up the name
+    vesselName = vesselName.replace(/CBM/i, "").trim();
+    
+    return vesselName;
+}
+
+// Format file size
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// Process uploaded files
+function processFiles() {
+    const fileInput = document.getElementById('file-input');
+    const files = fileInput.files;
+    
+    if (files.length === 0) {
+        showToast('Please upload files first', 'error');
+        return;
+    }
+    
+    // Show processing indicator
+    const processingResults = document.getElementById('processing-results');
+    processingResults.classList.remove('hidden');
+    
+    // Get processing options
+    const processVibration = document.getElementById('process-vibration').checked;
+    const processRPM = document.getElementById('process-rpm').checked;
+    const processAmpere = document.getElementById('process-ampere').checked;
+    
+    // Start processing timer
+    const startTime = performance.now();
+    
+    // Process each file
+    let totalRecords = 0;
+    let processedFiles = 0;
+    
+    // Clear existing data
+    dashboardData.vessels = [];
+    dashboardData.equipmentCodes = {};
+    dashboardData.components = {};
+    dashboardData.readings = [];
+    
+    // Process files sequentially
+    processNextFile(files, 0, processVibration, processRPM, processAmpere, startTime, totalRecords, processedFiles);
+}
+
+// Process files sequentially
+function processNextFile(files, index, processVibration, processRPM, processAmpere, startTime, totalRecords, processedFiles) {
+    if (index >= files.length) {
+        // All files processed
+        finishProcessing(startTime, totalRecords, processedFiles);
+        return;
+    }
+    
+    const file = files[index];
+    const reader = new FileReader();
+    
+    reader.onload = function(e) {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            
+            // Process the first sheet
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            
+            // Convert to JSON
+            const jsonData = XLSX.utils.sheet_to_json(worksheet);
+            
+            // Extract vessel name from filename
+            const vesselName = extractVesselName(file.name);
+            
+            // Add vessel to list if not already present
+            if (!dashboardData.vessels.includes(vesselName)) {
+                dashboardData.vessels.push(vesselName);
+            }
+            
+            // Process each row
+            const fileRecords = processExcelData(jsonData, vesselName, processVibration, processRPM, processAmpere);
+            
+            // Update total records
+            totalRecords += fileRecords;
+            processedFiles++;
+            
+            // Update processing results
+            document.getElementById('processed-files').textContent = processedFiles;
+            document.getElementById('processed-records').textContent = totalRecords;
+            
+            // Process next file
+            processNextFile(files, index + 1, processVibration, processRPM, processAmpere, startTime, totalRecords, processedFiles);
+        } catch (error) {
+            console.error('Error processing file:', error);
+            showToast('Error processing file: ' + error.message, 'error');
+            
+            // Process next file despite error
+            processNextFile(files, index + 1, processVibration, processRPM, processAmpere, startTime, totalRecords, processedFiles);
+        }
+    };
+    
+    reader.onerror = function() {
+        console.error('Error reading file');
+        showToast('Error reading file', 'error');
+        
+        // Process next file despite error
+        processNextFile(files, index + 1, processVibration, processRPM, processAmpere, startTime, totalRecords, processedFiles);
+    };
+    
+    // Read the file
+    reader.readAsArrayBuffer(file);
+}
+
+// Process Excel data
+function processExcelData(jsonData, vesselName, processVibration, processRPM, processAmpere) {
+    let recordCount = 0;
+    
+    // Process each row
+    jsonData.forEach(row => {
+        try {
+            // Skip rows without equipment code
+            if (!row.MP_NUMBER) {
+                return;
+            }
+            
+            // Get equipment code and component
+            const equipmentCode = String(row.MP_NUMBER);
+            const component = String(row.COMP_NAME || '');
+            
+            // Add equipment code to list if not already present
+            if (!dashboardData.equipmentCodes[vesselName]) {
+                dashboardData.equipmentCodes[vesselName] = [];
+            }
+            if (!dashboardData.equipmentCodes[vesselName].includes(equipmentCode)) {
+                dashboardData.equipmentCodes[vesselName].push(equipmentCode);
+            }
+            
+            // Add component to list if not already present
+            if (!dashboardData.components[equipmentCode]) {
+                dashboardData.components[equipmentCode] = [];
+            }
+            if (!dashboardData.components[equipmentCode].includes(component)) {
+                dashboardData.components[equipmentCode].push(component);
+            }
+            
+            // Format timestamp
+            let timestamp;
+            try {
+                timestamp = formatTimestamp(row.DATE, row.TIME);
+            } catch (e) {
+                console.warn('Error formatting timestamp:', e);
+                timestamp = new Date().toISOString();
+            }
+            
+            // Process vibration data
+            if (processVibration) {
+                // Velocity
+                if ('Vel, Rms (RMS)' in row && row['Vel, Rms (RMS)'] !== null && row['Vel, Rms (RMS)'] !== undefined) {
+                    addReading(vesselName, equipmentCode, component, timestamp, 'Vel, Rms (RMS)', row['Vel, Rms (RMS)']);
+                    recordCount++;
+                }
+                
+                // Displacement
+                if ('Disp, Rms (RMS)' in row && row['Disp, Rms (RMS)'] !== null && row['Disp, Rms (RMS)'] !== undefined) {
+                    addReading(vesselName, equipmentCode, component, timestamp, 'Disp, Rms (RMS)', row['Disp, Rms (RMS)']);
+                    recordCount++;
+                }
+                
+                // Acceleration
+                if ('Acc, Rms (RMS)' in row && row['Acc, Rms (RMS)'] !== null && row['Acc, Rms (RMS)'] !== undefined) {
+                    addReading(vesselName, equipmentCode, component, timestamp, 'Acc, Rms (RMS)', row['Acc, Rms (RMS)']);
+                    recordCount++;
+                }
+            }
+            
+            // Process RPM data
+            if (processRPM && 'RPM1' in row && row.RPM1 !== null && row.RPM1 !== undefined) {
+                addReading(vesselName, equipmentCode, component, timestamp, 'RPM1', row.RPM1);
+                recordCount++;
+            }
+            
+            // Process Ampere data
+            if (processAmpere && 'ALT_1' in row && row.ALT_1 !== null && row.ALT_1 !== undefined) {
+                addReading(vesselName, equipmentCode, component, timestamp, 'ALT_1', row.ALT_1);
+                recordCount++;
+            }
+        } catch (error) {
+            console.error('Error processing row:', error, row);
+        }
+    });
+    
+    return recordCount;
+}
+
+// Format timestamp
+function formatTimestamp(date, time) {
+    // Handle different date formats
+    let dateObj;
+    
+    // Handle Excel numeric date format
+    if (typeof date === 'number') {
+        // Excel dates are number of days since 1900-01-01
+        const excelEpoch = new Date(1900, 0, 1);
+        dateObj = new Date(excelEpoch);
+        dateObj.setDate(excelEpoch.getDate() + date - 1); // -1 because Excel counts from 1/1/1900, but 1/1/1900 is day 1
+    } 
+    // Handle JavaScript Date object
+    else if (date instanceof Date) {
+        dateObj = new Date(date);
+    }
+    // Handle string date format
+    else if (typeof date === 'string') {
+        // Try to parse the date string
+        dateObj = moment(date).toDate();
+    }
+    // Handle timestamp object from pandas
+    else if (date && typeof date.getTime === 'function') {
+        dateObj = new Date(date.getTime());
+    }
+    else {
+        // Default to current date if we can't parse
+        dateObj = new Date();
+    }
+    
+    // Add time component if available
+    if (time !== undefined && time !== null) {
+        // Handle numeric time (fraction of day)
+        if (typeof time === 'number') {
+            const seconds = time * 24 * 60 * 60;
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+            
+            dateObj.setHours(hours, minutes, secs);
+        }
+        // Handle string time format (HH:MM:SS)
+        else if (typeof time === 'string') {
+            const timeParts = time.split(':');
+            if (timeParts.length >= 2) {
+                const hours = parseInt(timeParts[0], 10);
+                const minutes = parseInt(timeParts[1], 10);
+                const seconds = timeParts.length > 2 ? parseInt(timeParts[2], 10) : 0;
+                
+                dateObj.setHours(hours, minutes, seconds);
+            }
+        }
+        // Handle time object
+        else if (time && typeof time.getHours === 'function') {
+            dateObj.setHours(time.getHours(), time.getMinutes(), time.getSeconds());
+        }
+    }
+    
+    return dateObj.toISOString();
+}
+
+// Add reading to data store
+function addReading(vessel, equipmentCode, component, timestamp, parameter, value) {
+    // Convert value to number if it's not already
+    if (typeof value !== 'number') {
+        value = parseFloat(value);
+    }
+    
+    // Skip if value is NaN
+    if (isNaN(value)) {
+        return;
+    }
+    
+    // Add reading to data store
+    dashboardData.readings.push({
+        vessel: vessel,
+        equipmentCode: equipmentCode,
+        component: component,
+        timestamp: timestamp,
+        parameter: parameter,
+        value: value
+    });
+}
+
+// Finish processing
+function finishProcessing(startTime, totalRecords, processedFiles) {
+    // Calculate processing time
+    const endTime = performance.now();
+    const processingTime = ((endTime - startTime) / 1000).toFixed(2);
+    
+    // Update processing results
+    document.getElementById('processing-time').textContent = processingTime + 's';
+    
+    // Show success message
+    showToast(`Successfully processed ${totalRecords} records from ${processedFiles} files`, 'success');
+    
+    // Update vessel dropdowns
+    updateVesselDropdowns();
+    
+    // Save data to localStorage
+    saveDataToLocalStorage();
+    
+    // Switch to Equipment Analysis tab
+    document.querySelector('[data-tab="equipment"]').click();
+}
+
+// Update vessel dropdowns
+function updateVesselDropdowns() {
+    // Sort vessels alphabetically
+    dashboardData.vessels.sort();
+    
+    // Equipment Analysis tab
+    const equipmentVesselSelect = document.getElementById('equipment-vessel');
+    equipmentVesselSelect.innerHTML = '<option value="">Select Vessel</option>';
+    
+    // Trend Analysis tab
+    const trendVesselSelect = document.getElementById('trend-vessel');
+    trendVesselSelect.innerHTML = '<option value="">All Vessels</option>';
+    
+    // Raw Data tab
+    const rawVesselSelect = document.getElementById('raw-vessel');
+    rawVesselSelect.innerHTML = '<option value="">All Vessels</option>';
+    
+    // Missing Readings tab
+    const missingVesselSelect = document.getElementById('missing-vessel');
+    missingVesselSelect.innerHTML = '<option value="">All Vessels</option>';
+    
+    // Add vessels to dropdowns
+    dashboardData.vessels.forEach(vessel => {
+        // Equipment Analysis tab
+        const equipmentOption = document.createElement('option');
+        equipmentOption.value = vessel;
+        equipmentOption.textContent = vessel;
+        equipmentVesselSelect.appendChild(equipmentOption);
+        
+        // Trend Analysis tab
+        const trendOption = document.createElement('option');
+        trendOption.value = vessel;
+        trendOption.textContent = vessel;
+        trendVesselSelect.appendChild(trendOption);
+        
+        // Raw Data tab
+        const rawOption = document.createElement('option');
+        rawOption.value = vessel;
+        rawOption.textContent = vessel;
+        rawVesselSelect.appendChild(rawOption);
+        
+        // Missing Readings tab
+        const missingOption = document.createElement('option');
+        missingOption.value = vessel;
+        missingOption.textContent = vessel;
+        missingVesselSelect.appendChild(missingOption);
+    });
+    
+    // Update equipment codes
+    updateEquipmentCodes();
+}
+
+// Update equipment codes based on selected vessel
+function updateEquipmentCodes() {
+    const vessel = document.getElementById('equipment-vessel').value;
+    const equipmentCodeSelect = document.getElementById('equipment-code');
+    
+    equipmentCodeSelect.innerHTML = '<option value="">Select Code</option>';
+    
+    if (vessel && dashboardData.equipmentCodes[vessel]) {
+        // Sort equipment codes alphabetically
+        dashboardData.equipmentCodes[vessel].sort();
+        
+        // Add equipment codes to dropdown
+        dashboardData.equipmentCodes[vessel].forEach(code => {
+            const option = document.createElement('option');
+            option.value = code;
+            option.textContent = code;
+            equipmentCodeSelect.appendChild(option);
+        });
+    }
+    
+    // Update components
+    updateEquipmentComponents();
+}
+
+// Update components based on selected equipment code
+function updateEquipmentComponents() {
+    const equipmentCode = document.getElementById('equipment-code').value;
+    const componentSelect = document.getElementById('equipment-component');
+    
+    componentSelect.innerHTML = '<option value="">Select Component</option>';
+    
+    if (equipmentCode && dashboardData.components[equipmentCode]) {
+        // Sort components alphabetically
+        dashboardData.components[equipmentCode].sort();
+        
+        // Add components to dropdown
+        dashboardData.components[equipmentCode].forEach(component => {
+            const option = document.createElement('option');
+            option.value = component;
+            option.textContent = component;
+            componentSelect.appendChild(option);
+        });
+    }
+    
+    // Update equipment analysis
+    updateEquipmentAnalysis();
+}
+
+// Update equipment analysis
+function updateEquipmentAnalysis() {
+    const vessel = document.getElementById('equipment-vessel').value;
+    const equipmentCode = document.getElementById('equipment-code').value;
+    const component = document.getElementById('equipment-component').value;
+    const parameter = document.getElementById('equipment-parameter').value;
+    
+    // Filter readings
+    let filteredReadings = dashboardData.readings;
+    
+    if (vessel) {
+        filteredReadings = filteredReadings.filter(reading => reading.vessel === vessel);
+    }
+    
+    if (equipmentCode) {
+        filteredReadings = filteredReadings.filter(reading => reading.equipmentCode === equipmentCode);
+    }
+    
+    if (component) {
+        filteredReadings = filteredReadings.filter(reading => reading.component === component);
+    }
+    
+    if (parameter) {
+        filteredReadings = filteredReadings.filter(reading => reading.parameter === parameter);
+    }
+    
+    // Sort readings by timestamp
+    filteredReadings.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    
+    // Update trend chart
+    updateEquipmentTrendChart(filteredReadings, parameter);
+    
+    // Update RPM vs Ampere chart
+    updateRPMvsAmpereChart(vessel, equipmentCode, component);
+    
+    // Update recent readings table
+    updateRecentReadingsTable(filteredReadings);
+}
+
+// Update equipment trend chart
+function updateEquipmentTrendChart(readings, parameter) {
+    const canvas = document.getElementById('equipment-trend-chart');
+    
+    // Destroy existing chart
+    if (dashboardData.charts.equipmentTrend) {
+        dashboardData.charts.equipmentTrend.destroy();
+    }
+    
+    // Check if we have data
+    if (readings.length === 0) {
+        canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+        return;
+    }
+    
+    // Filter readings by parameter
+    const parameterReadings = readings.filter(reading => reading.parameter === parameter);
+    
+    // Check if we have data for this parameter
+    if (parameterReadings.length === 0) {
+        canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+        return;
+    }
+    
+    // Prepare data for chart
+    const labels = parameterReadings.map(reading => {
+        const date = new Date(reading.timestamp);
+        return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+    });
+    
+    const values = parameterReadings.map(reading => reading.value);
+    
+    // Get parameter metadata
+    const parameterInfo = dashboardData.parameters[parameter] || {};
+    const unit = parameterInfo.unit || '';
+    const thresholdWarning = parameterInfo.thresholdWarning;
+    const thresholdCritical = parameterInfo.thresholdCritical;
+    
+    // Create datasets
+    const datasets = [
+        {
+            label: parameter + (unit ? ` (${unit})` : ''),
+            data: values,
+            borderColor: 'rgb(59, 130, 246)',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            borderWidth: 2,
+            tension: 0.1,
+            fill: true
+        }
+    ];
+    
+    // Add threshold lines if available
+    if (thresholdWarning !== undefined) {
+        datasets.push({
+            label: 'Warning Threshold',
+            data: Array(labels.length).fill(thresholdWarning),
+            borderColor: 'rgb(245, 158, 11)',
+            borderWidth: 2,
+            borderDash: [5, 5],
+            pointRadius: 0,
+            fill: false
+        });
+    }
+    
+    if (thresholdCritical !== undefined) {
+        datasets.push({
+            label: 'Critical Threshold',
+            data: Array(labels.length).fill(thresholdCritical),
+            borderColor: 'rgb(239, 68, 68)',
+            borderWidth: 2,
+            borderDash: [5, 5],
+            pointRadius: 0,
+            fill: false
+        });
+    }
+    
+    // Create chart
+    dashboardData.charts.equipmentTrend = new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: {
+                    ticks: {
+                        maxRotation: 45,
+                        minRotation: 45
+                    }
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const value = context.raw;
+                            return `${context.dataset.label}: ${value}`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Update RPM vs Ampere chart
+function updateRPMvsAmpereChart(vessel, equipmentCode, component) {
+    const canvas = document.getElementById('rpm-ampere-chart');
+    
+    // Destroy existing chart
+    if (dashboardData.charts.rpmAmpere) {
+        dashboardData.charts.rpmAmpere.destroy();
+    }
+    
+    // Check if we have vessel and equipment code
+    if (!vessel || !equipmentCode) {
+        canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+        return;
+    }
+    
+    // Filter readings
+    let filteredReadings = dashboardData.readings.filter(reading => 
+        reading.vessel === vessel && 
+        reading.equipmentCode === equipmentCode
+    );
+    
+    if (component) {
+        filteredReadings = filteredReadings.filter(reading => reading.component === component);
+    }
+    
+    // Group readings by timestamp
+    const readingsByTimestamp = {};
+    
+    filteredReadings.forEach(reading => {
+        if (!readingsByTimestamp[reading.timestamp]) {
+            readingsByTimestamp[reading.timestamp] = {};
+        }
+        
+        readingsByTimestamp[reading.timestamp][reading.parameter] = reading.value;
+    });
+    
+    // Extract RPM and Ampere data
+    const data = [];
+    
+    Object.keys(readingsByTimestamp).forEach(timestamp => {
+        const readings = readingsByTimestamp[timestamp];
+        
+        if (readings.RPM1 !== undefined && readings.ALT_1 !== undefined) {
+            data.push({
+                rpm: readings.RPM1,
+                ampere: readings.ALT_1,
+                timestamp: timestamp
+            });
+        }
+    });
+    
+    // Check if we have data
+    if (data.length === 0) {
+        canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+        return;
+    }
+    
+    // Sort data by timestamp
+    data.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    
+    // Prepare data for chart
+    const rpmValues = data.map(item => item.rpm);
+    const ampereValues = data.map(item => item.ampere);
+    const timestamps = data.map(item => {
+        const date = new Date(item.timestamp);
+        return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+    });
+    
+    // Create chart
+    dashboardData.charts.rpmAmpere = new Chart(canvas, {
+        type: 'scatter',
+        data: {
+            datasets: [{
+                label: 'RPM vs Ampere',
+                data: data.map((item, index) => ({
+                    x: item.rpm,
+                    y: item.ampere,
+                    timestamp: timestamps[index]
+                })),
+                backgroundColor: 'rgb(59, 130, 246)',
+                borderColor: 'rgb(59, 130, 246)',
+                borderWidth: 1,
+                pointRadius: 5,
+                pointHoverRadius: 7
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: {
+                    title: {
+                        display: true,
+                        text: 'RPM'
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: 'Ampere'
+                    }
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const dataPoint = context.raw;
+                            return [
+                                `Timestamp: ${dataPoint.timestamp}`,
+                                `RPM: ${dataPoint.x}`,
+                                `Ampere: ${dataPoint.y}`
+                            ];
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Update recent readings table
+function updateRecentReadingsTable(readings) {
+    const tableBody = document.getElementById('equipment-readings');
+    
+    // Clear table
+    tableBody.innerHTML = '';
+    
+    // Check if we have data
+    if (readings.length === 0) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td colspan="6" class="px-4 py-4 text-center text-gray-500">No data available</td>';
+        tableBody.appendChild(row);
+        return;
+    }
+    
+    // Sort readings by timestamp (newest first)
+    readings.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    
+    // Show only the 10 most recent readings
+    const recentReadings = readings.slice(0, 10);
+    
+    // Add rows to table
+    recentReadings.forEach(reading => {
+        const row = document.createElement('tr');
+        
+        // Format timestamp
+        const date = new Date(reading.timestamp);
+        const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+        
+        // Get parameter metadata
+        const parameterInfo = dashboardData.parameters[reading.parameter] || {};
+        const unit = parameterInfo.unit || '';
+        const thresholdWarning = parameterInfo.thresholdWarning;
+        const thresholdCritical = parameterInfo.thresholdCritical;
+        
+        // Determine status
+        let status = 'good';
+        let statusText = 'Good';
+        
+        if (thresholdCritical !== undefined && reading.value >= thresholdCritical) {
+            status = 'critical';
+            statusText = 'Critical';
+        } else if (thresholdWarning !== undefined && reading.value >= thresholdWarning) {
+            status = 'warning';
+            statusText = 'Warning';
+        }
+        
+        row.innerHTML = `
+            <td class="px-4 py-2 whitespace-nowrap">${formattedDate}</td>
+            <td class="px-4 py-2">${reading.equipmentCode}</td>
+            <td class="px-4 py-2">${reading.component}</td>
+            <td class="px-4 py-2">${reading.parameter}</td>
+            <td class="px-4 py-2">${reading.value} ${unit}</td>
+            <td class="px-4 py-2">
+                <span class="status-indicator status-${status}"></span>
+                ${statusText}
+            </td>
+        `;
+        
+        tableBody.appendChild(row);
+    });
+}
+
+// Update trend analysis
+function updateTrendAnalysis() {
+    const parameter = document.getElementById('trend-parameter').value;
+    const vessel = document.getElementById('trend-vessel').value;
+    const range = parseInt(document.getElementById('trend-range').value);
+    
+    // Filter readings
+    let filteredReadings = dashboardData.readings.filter(reading => reading.parameter === parameter);
+    
+    if (vessel) {
+        filteredReadings = filteredReadings.filter(reading => reading.vessel === vessel);
+    }
+    
+    if (range > 0) {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - range);
+        
+        filteredReadings = filteredReadings.filter(reading => new Date(reading.timestamp) >= cutoffDate);
+    }
+    
+    // Sort readings by timestamp
+    filteredReadings.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    
+    // Update trend chart
+    updateTrendChart(filteredReadings, parameter);
+    
+    // Update statistics
+    updateTrendStatistics(filteredReadings);
+}
+
+// Update trend chart
+function updateTrendChart(readings, parameter) {
+    const canvas = document.getElementById('trend-chart');
+    
+    // Destroy existing chart
+    if (dashboardData.charts.trend) {
+        dashboardData.charts.trend.destroy();
+    }
+    
+    // Check if we have data
+    if (readings.length === 0) {
+        canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+        return;
+    }
+    
+    // Get parameter metadata
+    const parameterInfo = dashboardData.parameters[parameter] || {};
+    const unit = parameterInfo.unit || '';
+    const thresholdWarning = parameterInfo.thresholdWarning;
+    const thresholdCritical = parameterInfo.thresholdCritical;
+    
+    // Group readings by vessel
+    const readingsByVessel = {};
+    
+    readings.forEach(reading => {
+        if (!readingsByVessel[reading.vessel]) {
+            readingsByVessel[reading.vessel] = [];
+        }
+        
+        readingsByVessel[reading.vessel].push(reading);
+    });
+    
+    // Prepare data for chart
+    const datasets = [];
+    const colors = [
+        'rgb(59, 130, 246)', // Blue
+        'rgb(16, 185, 129)', // Green
+        'rgb(245, 158, 11)', // Amber
+        'rgb(239, 68, 68)',  // Red
+        'rgb(139, 92, 246)'  // Purple
+    ];
+    
+    // Add datasets for each vessel
+    Object.keys(readingsByVessel).forEach((vessel, index) => {
+        const vesselReadings = readingsByVessel[vessel];
+        
+        // Sort readings by timestamp
+        vesselReadings.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        
+        datasets.push({
+            label: vessel,
+            data: vesselReadings.map(reading => ({
+                x: new Date(reading.timestamp),
+                y: reading.value
+            })),
+            borderColor: colors[index % colors.length],
+            backgroundColor: colors[index % colors.length],
+            borderWidth: 2,
+            tension: 0.1,
+            fill: false
+        });
+    });
+    
+    // Add threshold lines if available
+    if (thresholdWarning !== undefined) {
+        datasets.push({
+            label: 'Warning Threshold',
+            data: [
+                { x: new Date(readings[0].timestamp), y: thresholdWarning },
+                { x: new Date(readings[readings.length - 1].timestamp), y: thresholdWarning }
+            ],
+            borderColor: 'rgb(245, 158, 11)',
+            borderWidth: 2,
+            borderDash: [5, 5],
+            pointRadius: 0,
+            fill: false
+        });
+    }
+    
+    if (thresholdCritical !== undefined) {
+        datasets.push({
+            label: 'Critical Threshold',
+            data: [
+                { x: new Date(readings[0].timestamp), y: thresholdCritical },
+                { x: new Date(readings[readings.length - 1].timestamp), y: thresholdCritical }
+            ],
+            borderColor: 'rgb(239, 68, 68)',
+            borderWidth: 2,
+            borderDash: [5, 5],
+            pointRadius: 0,
+            fill: false
+        });
+    }
+    
+    // Create chart
+    dashboardData.charts.trend = new Chart(canvas, {
+        type: 'line',
+        data: {
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: {
+                    type: 'time',
+                    time: {
+                        unit: 'day'
+                    },
+                    title: {
+                        display: true,
+                        text: 'Date'
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: parameter + (unit ? ` (${unit})` : '')
+                    }
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const value = context.raw.y;
+                            return `${context.dataset.label}: ${value} ${unit}`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Update trend statistics
+function updateTrendStatistics(readings) {
+    // Check if we have data
+    if (readings.length === 0) {
+        document.getElementById('trend-average').textContent = '-';
+        document.getElementById('trend-minimum').textContent = '-';
+        document.getElementById('trend-maximum').textContent = '-';
+        document.getElementById('trend-stddev').textContent = '-';
+        return;
+    }
+    
+    // Calculate statistics
+    const values = readings.map(reading => reading.value);
+    
+    const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+    const minimum = Math.min(...values);
+    const maximum = Math.max(...values);
+    
+    // Calculate standard deviation
+    const variance = values.reduce((sum, value) => sum + Math.pow(value - average, 2), 0) / values.length;
+    const stddev = Math.sqrt(variance);
+    
+    // Get parameter metadata
+    const parameter = document.getElementById('trend-parameter').value;
+    const parameterInfo = dashboardData.parameters[parameter] || {};
+    const unit = parameterInfo.unit || '';
+    
+    // Update statistics
+    document.getElementById('trend-average').textContent = average.toFixed(2) + ' ' + unit;
+    document.getElementById('trend-minimum').textContent = minimum.toFixed(2) + ' ' + unit;
+    document.getElementById('trend-maximum').textContent = maximum.toFixed(2) + ' ' + unit;
+    document.getElementById('trend-stddev').textContent = stddev.toFixed(2) + ' ' + unit;
+}
+
+// Update raw data view
+function updateRawDataView() {
+    const search = document.getElementById('raw-search').value.toLowerCase();
+    const vessel = document.getElementById('raw-vessel').value;
+    const parameter = document.getElementById('raw-parameter').value;
+    const range = parseInt(document.getElementById('raw-range').value);
+    
+    // Filter readings
+    let filteredReadings = dashboardData.readings;
+    
+    if (search) {
+        filteredReadings = filteredReadings.filter(reading => 
+            reading.vessel.toLowerCase().includes(search) ||
+            reading.equipmentCode.toLowerCase().includes(search) ||
+            reading.component.toLowerCase().includes(search) ||
+            reading.parameter.toLowerCase().includes(search)
+        );
+    }
+    
+    if (vessel) {
+        filteredReadings = filteredReadings.filter(reading => reading.vessel === vessel);
+    }
+    
+    if (parameter) {
+        filteredReadings = filteredReadings.filter(reading => reading.parameter === parameter);
+    }
+    
+    if (range > 0) {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - range);
+        
+        filteredReadings = filteredReadings.filter(reading => new Date(reading.timestamp) >= cutoffDate);
+    }
+    
+    // Sort readings by timestamp (newest first)
+    filteredReadings.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    
+    // Update record count
+    document.getElementById('raw-record-count').textContent = filteredReadings.length;
+    
+    // Pagination
+    const pageSize = 20;
+    const currentPage = parseInt(document.getElementById('raw-current-page').textContent);
+    const totalPages = Math.ceil(filteredReadings.length / pageSize) || 1;
+    
+    document.getElementById('raw-total-pages').textContent = totalPages;
+    
+    // Adjust current page if needed
+    if (currentPage > totalPages) {
+        document.getElementById('raw-current-page').textContent = totalPages;
+    }
+    
+    // Update pagination buttons
+    document.getElementById('raw-prev-page').disabled = currentPage <= 1;
+    document.getElementById('raw-next-page').disabled = currentPage >= totalPages;
+    
+    // Get current page data
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    const pageData = filteredReadings.slice(startIndex, endIndex);
+    
+    // Update table
+    const tableBody = document.getElementById('raw-data-body');
+    tableBody.innerHTML = '';
+    
+    // Check if we have data
+    if (pageData.length === 0) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td colspan="6" class="px-4 py-4 text-center text-gray-500">No data available</td>';
+        tableBody.appendChild(row);
+        return;
+    }
+    
+    // Add rows to table
+    pageData.forEach(reading => {
+        const row = document.createElement('tr');
+        
+        // Format timestamp
+        const date = new Date(reading.timestamp);
+        const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+        
+        // Get parameter metadata
+        const parameterInfo = dashboardData.parameters[reading.parameter] || {};
+        const unit = parameterInfo.unit || '';
+        
+        row.innerHTML = `
+            <td class="px-4 py-2 whitespace-nowrap">${formattedDate}</td>
+            <td class="px-4 py-2">${reading.vessel}</td>
+            <td class="px-4 py-2">${reading.equipmentCode}</td>
+            <td class="px-4 py-2">${reading.component}</td>
+            <td class="px-4 py-2">${reading.parameter}</td>
+            <td class="px-4 py-2">${reading.value} ${unit}</td>
+        `;
+        
+        tableBody.appendChild(row);
+    });
+}
+
+// Update missing readings view
+function updateMissingReadingsView() {
+    const vessel = document.getElementById('missing-vessel').value;
+    const threshold = parseInt(document.getElementById('missing-threshold').value);
+    const sortBy = document.getElementById('missing-sort').value;
+    
+    // Get current date
+    const currentDate = new Date();
+    
+    // Group readings by equipment
+    const lastReadingByEquipment = {};
+    
+    // Process all readings
+    dashboardData.readings.forEach(reading => {
+        const key = `${reading.vessel}|${reading.equipmentCode}|${reading.component}`;
+        const readingDate = new Date(reading.timestamp);
+        
+        if (!lastReadingByEquipment[key] || readingDate > new Date(lastReadingByEquipment[key].timestamp)) {
+            lastReadingByEquipment[key] = reading;
+        }
+    });
+    
+    // Filter by vessel if needed
+    let equipmentKeys = Object.keys(lastReadingByEquipment);
+    
+    if (vessel) {
+        equipmentKeys = equipmentKeys.filter(key => key.split('|')[0] === vessel);
+    }
+    
+    // Calculate days since last reading and filter by threshold
+    const missingEquipment = [];
+    
+    equipmentKeys.forEach(key => {
+        const reading = lastReadingByEquipment[key];
+        const lastReadingDate = new Date(reading.timestamp);
+        const daysSinceLastReading = Math.floor((currentDate - lastReadingDate) / (1000 * 60 * 60 * 24));
+        
+        if (daysSinceLastReading >= threshold) {
+            const [vessel, equipmentCode, component] = key.split('|');
+            
+            missingEquipment.push({
+                vessel: vessel,
+                equipmentCode: equipmentCode,
+                component: component,
+                lastReading: lastReadingDate,
+                daysSinceLastReading: daysSinceLastReading
+            });
+        }
+    });
+    
+    // Sort missing equipment
+    if (sortBy === 'days') {
+        missingEquipment.sort((a, b) => b.daysSinceLastReading - a.daysSinceLastReading);
+    } else if (sortBy === 'vessel') {
+        missingEquipment.sort((a, b) => a.vessel.localeCompare(b.vessel));
+    } else if (sortBy === 'equipment') {
+        missingEquipment.sort((a, b) => a.equipmentCode.localeCompare(b.equipmentCode));
+    }
+    
+    // Update missing count
+    document.getElementById('missing-count').textContent = missingEquipment.length;
+    
+    // Update table
+    const tableBody = document.getElementById('missing-equipment-body');
+    tableBody.innerHTML = '';
+    
+    // Check if we have data
+    if (missingEquipment.length === 0) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td colspan="5" class="px-4 py-4 text-center text-gray-500">No missing readings found</td>';
+        tableBody.appendChild(row);
+        return;
+    }
+    
+    // Add rows to table
+    missingEquipment.forEach(item => {
+        const row = document.createElement('tr');
+        
+        // Format last reading date
+        const formattedDate = item.lastReading.toLocaleDateString() + ' ' + item.lastReading.toLocaleTimeString();
+        
+        // Determine status class based on days since last reading
+        let statusClass = '';
+        
+        if (item.daysSinceLastReading >= 90) {
+            statusClass = 'text-red-600 font-medium';
+        } else if (item.daysSinceLastReading >= 60) {
+            statusClass = 'text-amber-600 font-medium';
+        } else if (item.daysSinceLastReading >= 30) {
+            statusClass = 'text-yellow-600';
+        }
+        
+        row.innerHTML = `
+            <td class="px-4 py-2">${item.vessel}</td>
+            <td class="px-4 py-2">${item.equipmentCode}</td>
+            <td class="px-4 py-2">${item.component}</td>
+            <td class="px-4 py-2">${formattedDate}</td>
+            <td class="px-4 py-2 ${statusClass}">${item.daysSinceLastReading} days</td>
+        `;
+        
+        tableBody.appendChild(row);
+    });
+}
+
+// Export equipment data
+function exportEquipmentData() {
+    const vessel = document.getElementById('equipment-vessel').value;
+    const equipmentCode = document.getElementById('equipment-code').value;
+    const component = document.getElementById('equipment-component').value;
+    const parameter = document.getElementById('equipment-parameter').value;
+    
+    // Filter readings
+    let filteredReadings = dashboardData.readings;
+    
+    if (vessel) {
+        filteredReadings = filteredReadings.filter(reading => reading.vessel === vessel);
+    }
+    
+    if (equipmentCode) {
+        filteredReadings = filteredReadings.filter(reading => reading.equipmentCode === equipmentCode);
+    }
+    
+    if (component) {
+        filteredReadings = filteredReadings.filter(reading => reading.component === component);
+    }
+    
+    if (parameter) {
+        filteredReadings = filteredReadings.filter(reading => reading.parameter === parameter);
+    }
+    
+    // Sort readings by timestamp
+    filteredReadings.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    
+    // Export data
+    exportData(filteredReadings, 'equipment_data');
+}
+
+// Export trend data
+function exportTrendData() {
+    const parameter = document.getElementById('trend-parameter').value;
+    const vessel = document.getElementById('trend-vessel').value;
+    const range = parseInt(document.getElementById('trend-range').value);
+    
+    // Filter readings
+    let filteredReadings = dashboardData.readings.filter(reading => reading.parameter === parameter);
+    
+    if (vessel) {
+        filteredReadings = filteredReadings.filter(reading => reading.vessel === vessel);
+    }
+    
+    if (range > 0) {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - range);
+        
+        filteredReadings = filteredReadings.filter(reading => new Date(reading.timestamp) >= cutoffDate);
+    }
+    
+    // Sort readings by timestamp
+    filteredReadings.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    
+    // Export data
+    exportData(filteredReadings, 'trend_data');
+}
+
+// Export raw data
+function exportRawData() {
+    const search = document.getElementById('raw-search').value.toLowerCase();
+    const vessel = document.getElementById('raw-vessel').value;
+    const parameter = document.getElementById('raw-parameter').value;
+    const range = parseInt(document.getElementById('raw-range').value);
+    
+    // Filter readings
+    let filteredReadings = dashboardData.readings;
+    
+    if (search) {
+        filteredReadings = filteredReadings.filter(reading => 
+            reading.vessel.toLowerCase().includes(search) ||
+            reading.equipmentCode.toLowerCase().includes(search) ||
+            reading.component.toLowerCase().includes(search) ||
+            reading.parameter.toLowerCase().includes(search)
+        );
+    }
+    
+    if (vessel) {
+        filteredReadings = filteredReadings.filter(reading => reading.vessel === vessel);
+    }
+    
+    if (parameter) {
+        filteredReadings = filteredReadings.filter(reading => reading.parameter === parameter);
+    }
+    
+    if (range > 0) {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - range);
+        
+        filteredReadings = filteredReadings.filter(reading => new Date(reading.timestamp) >= cutoffDate);
+    }
+    
+    // Sort readings by timestamp
+    filteredReadings.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    
+    // Export data
+    exportData(filteredReadings, 'raw_data');
+}
+
+// Export missing data
+function exportMissingData() {
+    const vessel = document.getElementById('missing-vessel').value;
+    const threshold = parseInt(document.getElementById('missing-threshold').value);
+    
+    // Get current date
+    const currentDate = new Date();
+    
+    // Group readings by equipment
+    const lastReadingByEquipment = {};
+    
+    // Process all readings
+    dashboardData.readings.forEach(reading => {
+        const key = `${reading.vessel}|${reading.equipmentCode}|${reading.component}`;
+        const readingDate = new Date(reading.timestamp);
+        
+        if (!lastReadingByEquipment[key] || readingDate > new Date(lastReadingByEquipment[key].timestamp)) {
+            lastReadingByEquipment[key] = reading;
+        }
+    });
+    
+    // Filter by vessel if needed
+    let equipmentKeys = Object.keys(lastReadingByEquipment);
+    
+    if (vessel) {
+        equipmentKeys = equipmentKeys.filter(key => key.split('|')[0] === vessel);
+    }
+    
+    // Calculate days since last reading and filter by threshold
+    const missingEquipment = [];
+    
+    equipmentKeys.forEach(key => {
+        const reading = lastReadingByEquipment[key];
+        const lastReadingDate = new Date(reading.timestamp);
+        const daysSinceLastReading = Math.floor((currentDate - lastReadingDate) / (1000 * 60 * 60 * 24));
+        
+        if (daysSinceLastReading >= threshold) {
+            const [vessel, equipmentCode, component] = key.split('|');
+            
+            missingEquipment.push({
+                vessel: vessel,
+                equipmentCode: equipmentCode,
+                component: component,
+                lastReading: lastReadingDate.toISOString(),
+                daysSinceLastReading: daysSinceLastReading
+            });
+        }
+    });
+    
+    // Sort missing equipment by days since last reading
+    missingEquipment.sort((a, b) => b.daysSinceLastReading - a.daysSinceLastReading);
+    
+    // Export data
+    exportCSV(missingEquipment, 'missing_readings');
+}
+
+// Export data to CSV
+function exportData(readings, filename) {
+    // Check if we have data
+    if (readings.length === 0) {
+        showToast('No data to export', 'error');
+        return;
+    }
+    
+    // Convert readings to CSV format
+    const rows = [];
+    
+    // Add header row
+    rows.push(['Timestamp', 'Vessel', 'Equipment Code', 'Component', 'Parameter', 'Value']);
+    
+    // Add data rows
+    readings.forEach(reading => {
+        // Format timestamp
+        const date = new Date(reading.timestamp);
+        const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+        
+        rows.push([
+            formattedDate,
+            reading.vessel,
+            reading.equipmentCode,
+            reading.component,
+            reading.parameter,
+            reading.value
+        ]);
+    });
+    
+    // Convert to CSV
+    const csvContent = rows.map(row => row.join(',')).join('\n');
+    
+    // Create download link
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${filename}_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.style.display = 'none';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    showToast('Data exported successfully', 'success');
+}
+
+// Export data to CSV (generic version)
+function exportCSV(data, filename) {
+    // Check if we have data
+    if (data.length === 0) {
+        showToast('No data to export', 'error');
+        return;
+    }
+    
+    // Get headers from first object
+    const headers = Object.keys(data[0]);
+    
+    // Convert data to CSV format
+    const rows = [];
+    
+    // Add header row
+    rows.push(headers.join(','));
+    
+    // Add data rows
+    data.forEach(item => {
+        const row = headers.map(header => item[header]);
+        rows.push(row.join(','));
+    });
+    
+    // Convert to CSV
+    const csvContent = rows.join('\n');
+    
+    // Create download link
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${filename}_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.style.display = 'none';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    showToast('Data exported successfully', 'success');
+}
+
+// Show toast notification
+function showToast(message, type = 'success') {
+    const toast = document.getElementById('toast');
+    const toastMessage = document.getElementById('toast-message');
+    
+    // Set message
+    toastMessage.textContent = message;
+    
+    // Set color based on type
+    if (type === 'success') {
+        toast.className = 'bg-green-500 text-white px-6 py-3 rounded shadow-lg';
+    } else if (type === 'error') {
+        toast.className = 'bg-red-500 text-white px-6 py-3 rounded shadow-lg';
+    } else if (type === 'warning') {
+        toast.className = 'bg-yellow-500 text-white px-6 py-3 rounded shadow-lg';
+    }
+    
+    // Show toast
+    toast.classList.add('show');
+    
+    // Hide toast after 3 seconds
+    setTimeout(() => {
+        toast.classList.remove('show');
+    }, 3000);
+}
+
+// Save data to localStorage
+function saveDataToLocalStorage() {
+    try {
+        localStorage.setItem('cbm_dashboard_data', JSON.stringify({
+            vessels: dashboardData.vessels,
+            equipmentCodes: dashboardData.equipmentCodes,
+            components: dashboardData.components,
+            readings: dashboardData.readings
+        }));
+        
+        console.log('Data saved to localStorage');
+    } catch (error) {
+        console.error('Error saving data to localStorage:', error);
+    }
+}
+
+// Load data from localStorage
+function loadDataFromLocalStorage() {
+    try {
+        const savedData = localStorage.getItem('cbm_dashboard_data');
+        
+        if (savedData) {
+            const parsedData = JSON.parse(savedData);
+            
+            dashboardData.vessels = parsedData.vessels || [];
+            dashboardData.equipmentCodes = parsedData.equipmentCodes || {};
+            dashboardData.components = parsedData.components || {};
+            dashboardData.readings = parsedData.readings || [];
+            
+            console.log('Data loaded from localStorage');
+            
+            // Update UI
+            if (dashboardData.vessels.length > 0) {
+                updateVesselDropdowns();
+                showToast('Previous data loaded from localStorage', 'success');
+            }
+        }
+    } catch (error) {
+        console.error('Error loading data from localStorage:', error);
+    }
+}
