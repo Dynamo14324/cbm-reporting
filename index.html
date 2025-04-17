@@ -3,436 +3,407 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CBM Dashboard Test</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
-    <!-- Include the original CSS from index.html -->
+    <title>CBM Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.0/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/moment@2.29.1/moment.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
-        .dropzone {
-            border: 2px dashed #3b82f6;
-            transition: all 0.3s;
+        .tab-content {
+            display: none;
         }
-        .dropzone.active {
-            background-color: #f0f9ff;
-            border-color: #2563eb;
+        .tab-content.active {
+            display: block;
         }
         .status-indicator {
             display: inline-block;
-            width: 12px;
-            height: 12px;
+            width: 10px;
+            height: 10px;
             border-radius: 50%;
-            margin-right: 6px;
+            margin-right: 5px;
         }
-        .status-good { background-color: #10b981; }
-        .status-warning { background-color: #f59e0b; }
-        .status-critical { background-color: #ef4444; }
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
+        .status-good {
+            background-color: #10B981;
+        }
+        .status-warning {
+            background-color: #F59E0B;
+        }
+        .status-critical {
+            background-color: #EF4444;
+        }
         #toast {
             position: fixed;
-            top: 20px;
+            bottom: 20px;
             right: 20px;
-            z-index: 1000;
+            z-index: 9999;
+            visibility: hidden;
             opacity: 0;
-            transition: opacity 0.3s;
+            transition: visibility 0s, opacity 0.5s linear;
         }
-        #toast.show { opacity: 1; }
-        .chart-container {
-            position: relative;
-            height: 400px;
-            width: 100%;
-        }
-        @media (max-width: 768px) {
-            .chart-container {
-                height: 300px;
-            }
-            .filter-grid {
-                grid-template-columns: 1fr;
-            }
+        #toast.show {
+            visibility: visible;
+            opacity: 1;
         }
     </style>
 </head>
-<body class="bg-gray-50">
-    <!-- Toast Notification -->
-    <div id="toast" class="bg-green-500 text-white px-6 py-3 rounded shadow-lg">
-        <span id="toast-message">Success!</span>
-    </div>
-
-    <div class="container mx-auto px-4 py-6">
-        <!-- Header -->
-        <header class="bg-blue-800 text-white p-4 rounded-t-lg">
-            <h1 class="text-2xl font-bold">Enhanced CBM Dashboard</h1>
-            <p class="text-blue-200">Comprehensive equipment monitoring system</p>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <header class="mb-8">
+            <h1 class="text-3xl font-bold text-gray-800">Vessel Condition-Based Monitoring Dashboard</h1>
+            <p class="text-gray-600">Monitor and analyze vessel equipment performance data</p>
         </header>
 
-        <!-- Tabs -->
-        <div class="flex border-b border-gray-200 bg-white overflow-x-auto">
-            <button class="tab-btn py-4 px-6 font-medium border-b-2 border-blue-800 text-blue-800 whitespace-nowrap" data-tab="upload">Data Upload</button>
-            <button class="tab-btn py-4 px-6 font-medium text-gray-500 whitespace-nowrap" data-tab="equipment">Equipment Analysis</button>
-            <button class="tab-btn py-4 px-6 font-medium text-gray-500 whitespace-nowrap" data-tab="trend">Trend Analysis</button>
-            <button class="tab-btn py-4 px-6 font-medium text-gray-500 whitespace-nowrap" data-tab="raw">Raw Data</button>
-            <button class="tab-btn py-4 px-6 font-medium text-gray-500 whitespace-nowrap" data-tab="missing">Missing Readings</button>
-        </div>
-
-        <!-- Upload Tab -->
-        <div id="upload" class="tab-content active bg-white p-6 rounded-b-lg shadow">
-            <div id="dropzone" class="dropzone rounded-lg p-12 text-center cursor-pointer mb-6">
-                <div class="flex flex-col items-center justify-center">
-                    <svg class="w-12 h-12 text-blue-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
-                    </svg>
-                    <h3 class="text-lg font-medium text-gray-700">Drag & drop files here</h3>
-                    <p class="text-gray-500 mt-1">or click to browse files</p>
-                    <input type="file" id="file-input" class="hidden" accept=".xlsx,.xls,.csv" multiple>
-                </div>
-            </div>
-            
-            <div class="mb-6">
-                <h3 class="font-medium text-gray-700 mb-3">Processing Options</h3>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <label class="flex items-center">
-                        <input type="checkbox" class="form-checkbox h-5 w-5 text-blue-600" checked id="process-vibration">
-                        <span class="ml-2 text-gray-700">Process vibration data</span>
-                    </label>
-                    <label class="flex items-center">
-                        <input type="checkbox" class="form-checkbox h-5 w-5 text-blue-600" checked id="process-rpm">
-                        <span class="ml-2 text-gray-700">Include RPM analysis</span>
-                    </label>
-                    <label class="flex items-center">
-                        <input type="checkbox" class="form-checkbox h-5 w-5 text-blue-600" checked id="process-ampere">
-                        <span class="ml-2 text-gray-700">Include ampere analysis</span>
-                    </label>
-                </div>
-            </div>
-            
-            <button id="process-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-lg flex items-center">
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+        <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4">Data Import</h2>
+            <div id="dropzone" class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:bg-gray-50 transition">
+                <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
                 </svg>
+                <p class="text-gray-700 font-medium">Drag and drop Excel files here, or click to browse</p>
+                <p class="text-gray-500 text-sm mt-1">Supported formats: .xls, .xlsx</p>
+                <input type="file" id="file-input" class="hidden" multiple accept=".xls,.xlsx">
+            </div>
+
+            <div id="file-list" class="mt-4 border border-gray-200 rounded-lg hidden">
+                <div class="text-gray-500 p-4 text-center">No files uploaded</div>
+            </div>
+
+            <div class="mt-4 flex flex-wrap gap-4">
+                <div class="flex items-center">
+                    <input type="checkbox" id="process-vibration" class="mr-2" checked>
+                    <label for="process-vibration">Process Vibration Data</label>
+                </div>
+                <div class="flex items-center">
+                    <input type="checkbox" id="process-rpm" class="mr-2" checked>
+                    <label for="process-rpm">Process RPM Data</label>
+                </div>
+                <div class="flex items-center">
+                    <input type="checkbox" id="process-ampere" class="mr-2" checked>
+                    <label for="process-ampere">Process Ampere Data</label>
+                </div>
+            </div>
+
+            <button id="process-btn" class="mt-4 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded">
                 Process Files
             </button>
-            
-            <div id="file-preview" class="mt-8">
-                <h3 class="font-medium text-gray-700 mb-3">Uploaded Files</h3>
-                <div id="file-list" class="border rounded-lg divide-y">
-                    <div class="text-gray-500 p-4 text-center">No files uploaded yet</div>
-                </div>
-            </div>
-            
-            <div id="processing-results" class="mt-8 hidden">
-                <div class="bg-blue-50 rounded-lg p-4 mb-4">
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div class="bg-white rounded-lg p-3 shadow-sm">
-                            <div class="text-sm text-gray-500">Files Processed</div>
-                            <div class="text-xl font-semibold text-blue-800" id="processed-files">0</div>
-                        </div>
-                        <div class="bg-white rounded-lg p-3 shadow-sm">
-                            <div class="text-sm text-gray-500">Records Added</div>
-                            <div class="text-xl font-semibold text-blue-800" id="processed-records">0</div>
-                        </div>
-                        <div class="bg-white rounded-lg p-3 shadow-sm">
-                            <div class="text-sm text-gray-500">Processing Time</div>
-                            <div class="text-xl font-semibold text-blue-800" id="processing-time">0s</div>
-                        </div>
+
+            <div id="processing-results" class="mt-4 p-4 bg-gray-50 rounded-lg hidden">
+                <h3 class="font-medium text-gray-800 mb-2">Processing Results</h3>
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <p class="text-gray-600 text-sm">Files Processed</p>
+                        <p id="processed-files" class="text-xl font-semibold">0</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-600 text-sm">Records Processed</p>
+                        <p id="processed-records" class="text-xl font-semibold">0</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-600 text-sm">Processing Time</p>
+                        <p id="processing-time" class="text-xl font-semibold">0.00s</p>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Equipment Analysis Tab -->
-        <div id="equipment" class="tab-content bg-white p-6 rounded-b-lg shadow">
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 filter-grid">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Vessel</label>
-                    <select id="equipment-vessel" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                        <option value="">Select Vessel</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Equipment Code</label>
-                    <select id="equipment-code" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                        <option value="">Select Code</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Component</label>
-                    <select id="equipment-component" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                        <option value="">Select Component</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Parameter</label>
-                    <select id="equipment-parameter" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                        <option value="Vel, Rms (RMS)">Vibration Velocity</option>
-                        <option value="Disp, Rms (RMS)">Vibration Displacement</option>
-                        <option value="Acc, Rms (RMS)">Vibration Acceleration</option>
-                        <option value="RPM1">RPM</option>
-                        <option value="ALT_1">Ampere</option>
-                    </select>
-                </div>
-            </div>
-            
-            <button id="export-equipment-btn" class="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-lg flex items-center mb-6">
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
-                </svg>
-                Export Data
-            </button>
-            
-            <div id="equipment-preview" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-100">
-                    <h3 class="font-medium text-gray-700 mb-3">Parameter Trend</h3>
-                    <div class="chart-container">
-                        <canvas id="equipment-trend-chart"></canvas>
-                    </div>
-                </div>
-                <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-100">
-                    <h3 class="font-medium text-gray-700 mb-3">RPM vs Ampere</h3>
-                    <div class="chart-container">
-                        <canvas id="rpm-ampere-chart"></canvas>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="mt-6">
-                <h3 class="font-medium text-gray-700 mb-3">Recent Readings</h3>
-                <div class="overflow-x-auto">
-                    <table class="min-w-full bg-white border rounded-lg">
-                        <thead class="bg-gray-50">
-                            <tr>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Timestamp</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Equipment Code</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Component</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Parameter</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Value</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody id="equipment-readings" class="divide-y">
-                            <tr>
-                                <td colspan="6" class="px-4 py-4 text-center text-gray-500">No data available</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- Trend Analysis Tab -->
-        <div id="trend" class="tab-content bg-white p-6 rounded-b-lg shadow">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 filter-grid">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Parameter</label>
-                    <select id="trend-parameter" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                        <option value="Vel, Rms (RMS)">Vibration Velocity</option>
-                        <option value="Disp, Rms (RMS)">Vibration Displacement</option>
-                        <option value="Acc, Rms (RMS)">Vibration Acceleration</option>
-                        <option value="RPM1">RPM</option>
-                        <option value="ALT_1">Ampere</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Vessel</label>
-                    <select id="trend-vessel" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                        <option value="">All Vessels</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Time Range</label>
-                    <select id="trend-range" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                        <option value="7">Last 7 days</option>
-                        <option value="30">Last 30 days</option>
-                        <option value="90">Last 90 days</option>
-                        <option value="0">All data</option>
-                    </select>
-                </div>
-            </div>
-            
-            <button id="export-trend-btn" class="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-lg flex items-center mb-6">
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
-                </svg>
-                Export Trend Data
-            </button>
-            
-            <div class="bg-white rounded-lg shadow-sm p-4 border border-gray-100 mb-6">
-                <h3 class="font-medium text-gray-700 mb-3">Parameter Trend</h3>
-                <div class="chart-container">
-                    <canvas id="trend-chart"></canvas>
-                </div>
-            </div>
-            
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div class="bg-white rounded-lg shadow-sm p-3 border border-gray-100">
-                    <div class="text-sm text-gray-500">Average</div>
-                    <div class="text-xl font-semibold" id="trend-average">-</div>
-                </div>
-                <div class="bg-white rounded-lg shadow-sm p-3 border border-gray-100">
-                    <div class="text-sm text-gray-500">Minimum</div>
-                    <div class="text-xl font-semibold" id="trend-minimum">-</div>
-                </div>
-                <div class="bg-white rounded-lg shadow-sm p-3 border border-gray-100">
-                    <div class="text-sm text-gray-500">Maximum</div>
-                    <div class="text-xl font-semibold" id="trend-maximum">-</div>
-                </div>
-                <div class="bg-white rounded-lg shadow-sm p-3 border border-gray-100">
-                    <div class="text-sm text-gray-500">Standard Deviation</div>
-                    <div class="text-xl font-semibold" id="trend-stddev">-</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Raw Data Tab -->
-        <div id="raw" class="tab-content bg-white p-6 rounded-b-lg shadow">
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 filter-grid">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Search</label>
-                    <input type="text" id="raw-search" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Search...">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Vessel</label>
-                    <select id="raw-vessel" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                        <option value="">All Vessels</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Parameter</label>
-                    <select id="raw-parameter" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                        <option value="Vel, Rms (RMS)">Vibration Velocity</option>
-                        <option value="Disp, Rms (RMS)">Vibration Displacement</option>
-                        <option value="Acc, Rms (RMS)">Vibration Acceleration</option>
-                        <option value="RPM1">RPM</option>
-                        <option value="ALT_1">Ampere</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Time Range</label>
-                    <select id="raw-range" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                        <option value="0">All data</option>
-                        <option value="7">Last 7 days</option>
-                        <option value="30">Last 30 days</option>
-                        <option value="90">Last 90 days</option>
-                    </select>
-                </div>
-            </div>
-            
-            <div class="flex justify-between items-center mb-6">
-                <div>
-                    <span class="text-gray-700">Total Records: </span>
-                    <span class="font-medium" id="raw-record-count">0</span>
-                </div>
-                <button id="export-raw-btn" class="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-lg flex items-center">
-                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
-                    </svg>
-                    Export Data
-                </button>
-            </div>
-            
-            <div class="overflow-x-auto">
-                <table class="min-w-full bg-white border rounded-lg">
-                    <thead class="bg-gray-50">
-                        <tr>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Timestamp</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Vessel</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Equipment Code</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Component</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Parameter</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Value</th>
-                        </tr>
-                    </thead>
-                    <tbody id="raw-data-body" class="divide-y">
-                        <tr>
-                            <td colspan="6" class="px-4 py-4 text-center text-gray-500">No data available</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            
-            <div class="flex justify-between items-center mt-4">
-                <div>
-                    <span class="text-gray-700">Page </span>
-                    <span id="raw-current-page" class="font-medium">1</span>
-                    <span class="text-gray-700"> of </span>
-                    <span id="raw-total-pages" class="font-medium">1</span>
-                </div>
-                <div class="flex space-x-2">
-                    <button id="raw-prev-page" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium py-2 px-4 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">
-                        Previous
+        <div class="bg-white rounded-lg shadow-md mb-8">
+            <div class="border-b border-gray-200">
+                <nav class="flex -mb-px">
+                    <button class="tab-btn border-blue-800 text-blue-800 whitespace-nowrap py-4 px-6 border-b-2 font-medium text-sm" data-tab="equipment">
+                        Equipment Analysis
                     </button>
-                    <button id="raw-next-page" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium py-2 px-4 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">
-                        Next
+                    <button class="tab-btn text-gray-500 hover:text-gray-700 whitespace-nowrap py-4 px-6 border-b-2 border-transparent font-medium text-sm" data-tab="trend">
+                        Trend Analysis
                     </button>
-                </div>
+                    <button class="tab-btn text-gray-500 hover:text-gray-700 whitespace-nowrap py-4 px-6 border-b-2 border-transparent font-medium text-sm" data-tab="raw">
+                        Raw Data
+                    </button>
+                    <button class="tab-btn text-gray-500 hover:text-gray-700 whitespace-nowrap py-4 px-6 border-b-2 border-transparent font-medium text-sm" data-tab="missing">
+                        Missing Readings
+                    </button>
+                </nav>
             </div>
-        </div>
 
-        <!-- Missing Readings Tab -->
-        <div id="missing" class="tab-content bg-white p-6 rounded-b-lg shadow">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 filter-grid">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Vessel</label>
-                    <select id="missing-vessel" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                        <option value="">All Vessels</option>
-                    </select>
+            <!-- Equipment Analysis Tab -->
+            <div id="equipment" class="tab-content active p-6">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <div>
+                        <label for="equipment-vessel" class="block text-sm font-medium text-gray-700 mb-1">Vessel</label>
+                        <select id="equipment-vessel" class="w-full border border-gray-300 rounded-md px-3 py-2">
+                            <option value="">Select Vessel</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="equipment-code" class="block text-sm font-medium text-gray-700 mb-1">Equipment Code</label>
+                        <select id="equipment-code" class="w-full border border-gray-300 rounded-md px-3 py-2">
+                            <option value="">All Equipment Codes</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="equipment-component" class="block text-sm font-medium text-gray-700 mb-1">Component</label>
+                        <select id="equipment-component" class="w-full border border-gray-300 rounded-md px-3 py-2">
+                            <option value="">All Components</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="equipment-parameter" class="block text-sm font-medium text-gray-700 mb-1">Parameter</label>
+                        <select id="equipment-parameter" class="w-full border border-gray-300 rounded-md px-3 py-2">
+                        </select>
+                    </div>
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Days Threshold</label>
-                    <select id="missing-threshold" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                        <option value="7">7 days</option>
-                        <option value="14">14 days</option>
-                        <option value="30" selected>30 days</option>
-                        <option value="60">60 days</option>
-                        <option value="90">90 days</option>
-                    </select>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <h3 class="text-lg font-medium text-gray-800 mb-4">Parameter Trend</h3>
+                        <div class="h-80">
+                            <canvas id="equipment-trend-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <h3 class="text-lg font-medium text-gray-800 mb-4">RPM vs Ampere</h3>
+                        <div class="h-80">
+                            <canvas id="rpm-ampere-chart"></canvas>
+                        </div>
+                    </div>
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Sort By</label>
-                    <select id="missing-sort" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                        <option value="days">Days Since Last Reading</option>
-                        <option value="vessel">Vessel</option>
-                        <option value="equipment">Equipment Code</option>
-                    </select>
+
+                <div class="bg-gray-50 p-4 rounded-lg mb-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-medium text-gray-800">Recent Readings</h3>
+                        <button id="export-equipment-btn" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-1 px-3 rounded">
+                            Export Data
+                        </button>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-100">
+                                <tr>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Timestamp</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Equipment Code</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Component</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Parameter</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Value</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="equipment-readings" class="bg-white divide-y divide-gray-200">
+                                <tr>
+                                    <td colspan="6" class="px-4 py-4 text-center text-gray-500">No data available</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
-            
-            <div class="flex justify-between items-center mb-6">
-                <div>
-                    <span class="text-gray-700">Equipment Missing Readings: </span>
-                    <span class="font-medium" id="missing-count">0</span>
+
+            <!-- Trend Analysis Tab -->
+            <div id="trend" class="tab-content p-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div>
+                        <label for="trend-parameter" class="block text-sm font-medium text-gray-700 mb-1">Parameter</label>
+                        <select id="trend-parameter" class="w-full border border-gray-300 rounded-md px-3 py-2">
+                        </select>
+                    </div>
+                    <div>
+                        <label for="trend-vessel" class="block text-sm font-medium text-gray-700 mb-1">Vessel</label>
+                        <select id="trend-vessel" class="w-full border border-gray-300 rounded-md px-3 py-2">
+                            <option value="">All Vessels</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="trend-range" class="block text-sm font-medium text-gray-700 mb-1">Time Range</label>
+                        <select id="trend-range" class="w-full border border-gray-300 rounded-md px-3 py-2">
+                            <option value="0">All Time</option>
+                            <option value="7">Last 7 Days</option>
+                            <option value="30">Last 30 Days</option>
+                            <option value="90">Last 90 Days</option>
+                            <option value="180">Last 180 Days</option>
+                            <option value="365">Last 365 Days</option>
+                        </select>
+                    </div>
                 </div>
-                <button id="export-missing-btn" class="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-lg flex items-center">
-                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
-                    </svg>
-                    Export Report
-                </button>
+
+                <div class="bg-gray-50 p-4 rounded-lg mb-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-medium text-gray-800">Parameter Trend Over Time</h3>
+                        <button id="export-trend-btn" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-1 px-3 rounded">
+                            Export Data
+                        </button>
+                    </div>
+                    <div class="h-96">
+                        <canvas id="trend-chart"></canvas>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h4 class="text-sm font-medium text-gray-500 mb-1">Average</h4>
+                        <p id="trend-average" class="text-2xl font-semibold">-</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h4 class="text-sm font-medium text-gray-500 mb-1">Minimum</h4>
+                        <p id="trend-minimum" class="text-2xl font-semibold">-</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h4 class="text-sm font-medium text-gray-500 mb-1">Maximum</h4>
+                        <p id="trend-maximum" class="text-2xl font-semibold">-</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h4 class="text-sm font-medium text-gray-500 mb-1">Standard Deviation</h4>
+                        <p id="trend-stddev" class="text-2xl font-semibold">-</p>
+                    </div>
+                </div>
             </div>
-            
-            <div class="overflow-x-auto">
-                <table class="min-w-full bg-white border rounded-lg">
-                    <thead class="bg-gray-50">
-                        <tr>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Vessel</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Equipment Code</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Component</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Last Reading</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Days Since Last Reading</th>
-                        </tr>
-                    </thead>
-                    <tbody id="missing-equipment-body" class="divide-y">
-                        <tr>
-                            <td colspan="5" class="px-4 py-4 text-center text-gray-500">No missing readings found</td>
-                        </tr>
-                    </tbody>
-                </table>
+
+            <!-- Raw Data Tab -->
+            <div id="raw" class="tab-content p-6">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <div>
+                        <label for="raw-search" class="block text-sm font-medium text-gray-700 mb-1">Search</label>
+                        <input type="text" id="raw-search" class="w-full border border-gray-300 rounded-md px-3 py-2" placeholder="Search...">
+                    </div>
+                    <div>
+                        <label for="raw-vessel" class="block text-sm font-medium text-gray-700 mb-1">Vessel</label>
+                        <select id="raw-vessel" class="w-full border border-gray-300 rounded-md px-3 py-2">
+                            <option value="">All Vessels</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="raw-parameter" class="block text-sm font-medium text-gray-700 mb-1">Parameter</label>
+                        <select id="raw-parameter" class="w-full border border-gray-300 rounded-md px-3 py-2">
+                            <option value="">All Parameters</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="raw-range" class="block text-sm font-medium text-gray-700 mb-1">Time Range</label>
+                        <select id="raw-range" class="w-full border border-gray-300 rounded-md px-3 py-2">
+                            <option value="0">All Time</option>
+                            <option value="7">Last 7 Days</option>
+                            <option value="30">Last 30 Days</option>
+                            <option value="90">Last 90 Days</option>
+                            <option value="180">Last 180 Days</option>
+                            <option value="365">Last 365 Days</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 p-4 rounded-lg mb-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <div class="flex items-center">
+                            <h3 class="text-lg font-medium text-gray-800 mr-2">Raw Data</h3>
+                            <span class="bg-blue-100 text-blue-800 text-xs font-semibold px-2.5 py-0.5 rounded">
+                                <span id="raw-record-count">0</span> records
+                            </span>
+                        </div>
+                        <button id="export-raw-btn" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-1 px-3 rounded">
+                            Export Data
+                        </button>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-100">
+                                <tr>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Timestamp</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vessel</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Equipment Code</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Component</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Parameter</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Value</th>
+                                </tr>
+                            </thead>
+                            <tbody id="raw-data-body" class="bg-white divide-y divide-gray-200">
+                                <tr>
+                                    <td colspan="6" class="px-4 py-4 text-center text-gray-500">No data available</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="flex items-center justify-between mt-4">
+                        <div class="text-sm text-gray-700">
+                            Page <span id="raw-current-page">1</span> of <span id="raw-total-pages">1</span>
+                        </div>
+                        <div class="flex space-x-2">
+                            <button id="raw-prev-page" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium py-1 px-3 rounded disabled:opacity-50 disabled:cursor-not-allowed">
+                                Previous
+                            </button>
+                            <button id="raw-next-page" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium py-1 px-3 rounded disabled:opacity-50 disabled:cursor-not-allowed">
+                                Next
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Missing Readings Tab -->
+            <div id="missing" class="tab-content p-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div>
+                        <label for="missing-vessel" class="block text-sm font-medium text-gray-700 mb-1">Vessel</label>
+                        <select id="missing-vessel" class="w-full border border-gray-300 rounded-md px-3 py-2">
+                            <option value="">All Vessels</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="missing-threshold" class="block text-sm font-medium text-gray-700 mb-1">Days Since Last Reading</label>
+                        <select id="missing-threshold" class="w-full border border-gray-300 rounded-md px-3 py-2">
+                            <option value="30">30+ Days</option>
+                            <option value="60">60+ Days</option>
+                            <option value="90">90+ Days</option>
+                            <option value="180">180+ Days</option>
+                            <option value="365">365+ Days</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="missing-sort" class="block text-sm font-medium text-gray-700 mb-1">Sort By</label>
+                        <select id="missing-sort" class="w-full border border-gray-300 rounded-md px-3 py-2">
+                            <option value="days">Days Since Last Reading</option>
+                            <option value="vessel">Vessel</option>
+                            <option value="equipment">Equipment Code</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 p-4 rounded-lg mb-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <div class="flex items-center">
+                            <h3 class="text-lg font-medium text-gray-800 mr-2">Equipment with Missing Readings</h3>
+                            <span class="bg-red-100 text-red-800 text-xs font-semibold px-2.5 py-0.5 rounded">
+                                <span id="missing-count">0</span> items
+                            </span>
+                        </div>
+                        <button id="export-missing-btn" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-1 px-3 rounded">
+                            Export Data
+                        </button>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-100">
+                                <tr>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vessel</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Equipment Code</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Component</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Reading</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Days Since</th>
+                                </tr>
+                            </thead>
+                            <tbody id="missing-equipment-body" class="bg-white divide-y divide-gray-200">
+                                <tr>
+                                    <td colspan="5" class="px-4 py-4 text-center text-gray-500">No missing readings found</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- Include the enhanced dashboard script -->
-    <script src="/enhanced_dashboard.js"></script>
+    <!-- Toast Notification -->
+    <div id="toast" class="bg-green-500 text-white px-6 py-3 rounded shadow-lg">
+        <span id="toast-message"></span>
+    </div>
+
+    <!-- Include the enhanced dashboard JavaScript -->
+    <script src="enhanced_dashboard_v2.js"></script>
 </body>
 </html>
